@@ -74,16 +74,42 @@ private:
     }
 
     string httpGet(const string& endpoint, long* httpCode = nullptr) {
+        cout << "[HTTP] httpGet 开始，endpoint: " << endpoint << endl;
+        cout.flush();
+        
+        if (!curl) {
+            cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
+            cerr.flush();
+            if (httpCode) *httpCode = 0;
+            return "";
+        }
+        
+        cout << "[HTTP] 获取锁..." << endl;
+        cout.flush();
         lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
+        cout << "[HTTP] 已获取锁" << endl;
+        cout.flush();
+        
         string response;
         string url = serverUrl + endpoint;
+        cout << "[HTTP] 准备请求URL: " << url << endl;
+        cout.flush();
+        
+        cout << "[HTTP] 设置CURL选项..." << endl;
+        cout.flush();
         
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
+        cout << "[HTTP] 执行curl_easy_perform..." << endl;
+        cout.flush();
+        
         CURLcode res = curl_easy_perform(curl);
+        
+        cout << "[HTTP] curl_easy_perform 返回，结果: " << res << " (" << curl_easy_strerror(res) << ")" << endl;
+        cout.flush();
         
         if (res != CURLE_OK) {
             cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
@@ -92,7 +118,11 @@ private:
         }
         
         if (httpCode) {
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpCode);
+            CURLcode infoRes = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpCode);
+            if (infoRes != CURLE_OK) {
+                cerr << "[HTTP] 警告: 无法获取HTTP状态码: " << curl_easy_strerror(infoRes) << endl;
+                *httpCode = 0;  // 设置为0表示未知状态码
+            }
         }
         
         return response;
@@ -135,24 +165,54 @@ public:
         bool firstCheck = true;
         bool serverReachable = false;
         
+        cout << "[信令] 开始获取Answer，端点: " << serverUrl << endpoint << endl;
+        cout.flush();
+        
         for (int i = 0; i < 60; ++i) {
-            long httpCode = 0;
-            string response = httpGet(endpoint, &httpCode);
+            long httpCode = -1;  // 初始化为-1，便于区分未设置的情况
+            string response;
+            
+            try {
+                cout << "[信令] 第 " << (i+1) << " 次尝试获取Answer..." << endl;
+                cout.flush();
+                
+                response = httpGet(endpoint, &httpCode);
+                
+                cout << "[信令] httpGet 返回，状态码: " << httpCode << ", 响应长度: " << response.length() << endl;
+                cout.flush();
+            } catch (const exception& e) {
+                cerr << "[错误] httpGet异常: " << e.what() << endl;
+                cerr.flush();
+                return "";
+            } catch (...) {
+                cerr << "[错误] httpGet发生未知异常" << endl;
+                cerr.flush();
+                return "";
+            }
             
             // 检查服务器是否可达
             if (firstCheck) {
-                if (httpCode == 0) {
+                cout << "[信令] 首次检查，HTTP状态码: " << httpCode << ", 响应长度: " << response.length() << endl;
+                cout.flush();
+                
+                if (httpCode == 0 || httpCode == -1) {
                     cerr << "[错误] 无法连接到信令服务器: " << serverUrl << endl;
                     cerr << "[错误] 请确认信令服务器是否正在运行" << endl;
+                    cerr << "[错误] 响应内容: " << (response.empty() ? "(空)" : response.substr(0, 200)) << endl;
+                    cerr.flush();
                     return "";
                 } else if (httpCode == 200) {
                     serverReachable = true;
-                    cout << "[信令] 信令服务器连接正常" << endl;
+                    cout << "[信令] 信令服务器连接正常，已收到Answer" << endl;
+                    cout.flush();
                 } else if (httpCode == 404) {
                     serverReachable = true;
                     cout << "[信令] 信令服务器连接正常，等待接收端发送Answer..." << endl;
+                    cout.flush();
                 } else {
                     cerr << "[错误] 信令服务器返回错误状态码: " << httpCode << endl;
+                    cerr << "[错误] 响应内容: " << (response.empty() ? "(空)" : response.substr(0, 200)) << endl;
+                    cerr.flush();
                     return "";
                 }
                 firstCheck = false;
@@ -191,6 +251,7 @@ public:
         
         cerr << "[错误] 超时: 60秒内未能获取到接收端的Answer" << endl;
         cerr << "[错误] 请确认接收端是否已启动并连接到信令服务器" << endl;
+        cerr.flush();
         return "";
     }
 
@@ -398,9 +459,31 @@ void runSender(const string& serverUrl, const string& sessionId,
     }
 
     cout << "[信令] 等待接收端响应..." << endl;
+    cout.flush();  // 确保日志立即输出
+    
+    cout << "[信令] 准备调用 getAnswer()..." << endl;
+    cout.flush();
 
     // 读取远程answer
-    string answerSdp = signaling.getAnswer();
+    string answerSdp;
+    try {
+        cout << "[信令] 开始调用 signaling.getAnswer()..." << endl;
+        cout.flush();
+        
+        answerSdp = signaling.getAnswer();
+        
+        cout << "[信令] getAnswer() 返回，结果长度: " << answerSdp.length() << endl;
+        cout.flush();
+    } catch (const exception& e) {
+        cerr << "[错误] getAnswer() 异常: " << e.what() << endl;
+        cerr.flush();
+        return;
+    } catch (...) {
+        cerr << "[错误] getAnswer() 发生未知异常" << endl;
+        cerr.flush();
+        return;
+    }
+    
     if (answerSdp.empty()) {
         cerr << "[错误] 未能获取远程Answer，程序退出" << endl;
         cerr << "[提示] 请确保:" << endl;
