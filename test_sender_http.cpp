@@ -73,7 +73,7 @@ private:
         return response;
     }
 
-    string httpGet(const string& endpoint) {
+    string httpGet(const string& endpoint, long* httpCode = nullptr) {
         lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
@@ -86,8 +86,13 @@ private:
         CURLcode res = curl_easy_perform(curl);
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << endl;
+            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            if (httpCode) *httpCode = 0;
             return "";
+        }
+        
+        if (httpCode) {
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpCode);
         }
         
         return response;
@@ -127,8 +132,32 @@ public:
 
     string getAnswer() {
         string endpoint = "/session/" + sessionId + "/answer";
+        bool firstCheck = true;
+        bool serverReachable = false;
+        
         for (int i = 0; i < 60; ++i) {
-            string response = httpGet(endpoint);
+            long httpCode = 0;
+            string response = httpGet(endpoint, &httpCode);
+            
+            // 检查服务器是否可达
+            if (firstCheck) {
+                if (httpCode == 0) {
+                    cerr << "[错误] 无法连接到信令服务器: " << serverUrl << endl;
+                    cerr << "[错误] 请确认信令服务器是否正在运行" << endl;
+                    return "";
+                } else if (httpCode == 200) {
+                    serverReachable = true;
+                    cout << "[信令] 信令服务器连接正常" << endl;
+                } else if (httpCode == 404) {
+                    serverReachable = true;
+                    cout << "[信令] 信令服务器连接正常，等待接收端发送Answer..." << endl;
+                } else {
+                    cerr << "[错误] 信令服务器返回错误状态码: " << httpCode << endl;
+                    return "";
+                }
+                firstCheck = false;
+            }
+            
             if (!response.empty() && response.find("\"sdp\"") != string::npos) {
                 // 简单解析JSON
                 size_t sdpStart = response.find("\"sdp\":\"") + 7;
@@ -144,12 +173,24 @@ public:
                     cout << "[信令] 已获取远程Answer" << endl;
                     return sdp;
                 }
+            } else if (httpCode == 404) {
+                // 404 表示还没有 Answer，继续等待
+            } else if (httpCode != 200 && httpCode != 0) {
+                cerr << "[错误] 获取Answer时服务器返回错误: HTTP " << httpCode << endl;
+                if (!response.empty()) {
+                    cerr << "[错误] 响应内容: " << response << endl;
+                }
+                return "";
             }
+            
             this_thread::sleep_for(1s);
             if (i % 5 == 0) {
                 cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
             }
         }
+        
+        cerr << "[错误] 超时: 60秒内未能获取到接收端的Answer" << endl;
+        cerr << "[错误] 请确认接收端是否已启动并连接到信令服务器" << endl;
         return "";
     }
 
@@ -361,7 +402,11 @@ void runSender(const string& serverUrl, const string& sessionId,
     // 读取远程answer
     string answerSdp = signaling.getAnswer();
     if (answerSdp.empty()) {
-        cerr << "[错误] 未能获取远程Answer" << endl;
+        cerr << "[错误] 未能获取远程Answer，程序退出" << endl;
+        cerr << "[提示] 请确保:" << endl;
+        cerr << "  1. 信令服务器正在运行 (http://localhost:9227)" << endl;
+        cerr << "  2. 接收端已启动并连接到信令服务器" << endl;
+        cerr << "  3. 接收端和发送端使用相同的会话ID: " << sessionId << endl;
         return;
     }
 
