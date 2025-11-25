@@ -49,9 +49,10 @@ private:
         return size * nmemb;
     }
 
-    string httpPost(const string& endpoint, const string& jsonData) {
+    string httpPost(const string& endpoint, const string& jsonData, long* httpCode = nullptr) {
         if (!curl) {
             cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
+            if (httpCode) *httpCode = 0;
             return "";
         }
         
@@ -77,7 +78,16 @@ private:
         
         if (res != CURLE_OK) {
             cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            if (httpCode) *httpCode = 0;
             return "";
+        }
+        
+        if (httpCode) {
+            CURLcode infoRes = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpCode);
+            if (infoRes != CURLE_OK) {
+                cerr << "[HTTP] 警告: 无法获取HTTP状态码: " << curl_easy_strerror(infoRes) << endl;
+                *httpCode = 0;
+            }
         }
         
         return response;
@@ -137,11 +147,18 @@ public:
                 size_t sdpEnd = response.find("\"", sdpStart);
                 if (sdpEnd != string::npos) {
                     string sdp = response.substr(sdpStart, sdpEnd - sdpStart);
-                    // 恢复换行符
+                    // 恢复所有转义字符
                     size_t pos = 0;
-                    while ((pos = sdp.find("\\n", pos)) != string::npos) {
-                        sdp.replace(pos, 2, "\n");
-                        pos += 1;
+                    while ((pos = sdp.find("\\", pos)) != string::npos && pos < sdp.length() - 1) {
+                        char next = sdp[pos + 1];
+                        switch (next) {
+                            case 'n': sdp.replace(pos, 2, "\n"); break;
+                            case 'r': sdp.replace(pos, 2, "\r"); break;
+                            case 't': sdp.replace(pos, 2, "\t"); break;
+                            case '"': sdp.replace(pos, 2, "\""); break;
+                            case '\\': sdp.replace(pos, 2, "\\"); pos++; break;  // 跳过下一个字符，避免重复处理
+                            default: pos++; continue;  // 未知转义序列，跳过
+                        }
                     }
                     cout << "[信令] 已获取远程Offer" << endl;
                     return sdp;
@@ -159,26 +176,49 @@ public:
         cout << "[信令] 准备发送Answer，SDP长度: " << sdp.length() << endl;
         cout.flush();
         
-        stringstream json;
-        json << "{\"sdp\":\"" << sdp << "\"}";
-        string jsonStr = json.str();
         // 转义JSON字符串中的特殊字符
-        size_t pos = 0;
-        while ((pos = jsonStr.find("\n", pos)) != string::npos) {
-            jsonStr.replace(pos, 1, "\\n");
-            pos += 2;
+        string escapedSdp;
+        for (char c : sdp) {
+            switch (c) {
+                case '"':  escapedSdp += "\\\""; break;
+                case '\\': escapedSdp += "\\\\"; break;
+                case '\n': escapedSdp += "\\n"; break;
+                case '\r': escapedSdp += "\\r"; break;
+                case '\t': escapedSdp += "\\t"; break;
+                default:   escapedSdp += c; break;
+            }
         }
+        
+        stringstream json;
+        json << "{\"sdp\":\"" << escapedSdp << "\"}";
+        string jsonStr = json.str();
         
         string endpoint = "/session/" + sessionId + "/answer";
         cout << "[信令] 发送Answer到: " << serverUrl << endpoint << endl;
         cout.flush();
         
-        string response = httpPost(endpoint, jsonStr);
+        long httpCode = 0;
+        string response = httpPost(endpoint, jsonStr, &httpCode);
+        
+        if (httpCode == 0) {
+            cerr << "[错误] 发送Answer失败：无法连接到服务器" << endl;
+            cerr.flush();
+            return;
+        }
+        
+        if (httpCode != 200) {
+            cerr << "[错误] 发送Answer失败：HTTP状态码 " << httpCode << endl;
+            if (!response.empty()) {
+                cerr << "[错误] 响应内容: " << response.substr(0, min(response.length(), size_t(200))) << endl;
+            }
+            cerr.flush();
+            return;
+        }
         
         if (!response.empty()) {
             cout << "[信令] 服务器响应: " << response.substr(0, min(response.length(), size_t(100))) << endl;
         }
-        cout << "[信令] 已发送Answer到服务器" << endl;
+        cout << "[信令] 已发送Answer到服务器 (HTTP " << httpCode << ")" << endl;
         cout.flush();
     }
 
@@ -212,11 +252,18 @@ public:
             string candidate = response.substr(candStart, candEnd - candStart);
             string mid = response.substr(midStart, midEnd - midStart);
             
-            // 恢复转义字符
+            // 恢复所有转义字符
             size_t escPos = 0;
-            while ((escPos = candidate.find("\\n", escPos)) != string::npos) {
-                candidate.replace(escPos, 2, "\n");
-                escPos += 1;
+            while ((escPos = candidate.find("\\", escPos)) != string::npos && escPos < candidate.length() - 1) {
+                char next = candidate[escPos + 1];
+                switch (next) {
+                    case 'n': candidate.replace(escPos, 2, "\n"); break;
+                    case 'r': candidate.replace(escPos, 2, "\r"); break;
+                    case 't': candidate.replace(escPos, 2, "\t"); break;
+                    case '"': candidate.replace(escPos, 2, "\""); break;
+                    case '\\': candidate.replace(escPos, 2, "\\"); escPos++; break;
+                    default: escPos++; continue;
+                }
             }
             
             candidates.push_back({mid, candidate});

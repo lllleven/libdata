@@ -308,11 +308,18 @@ public:
                 size_t sdpEnd = response.find("\"", sdpStart);
                 if (sdpEnd != string::npos) {
                     string sdp = response.substr(sdpStart, sdpEnd - sdpStart);
-                    // 恢复换行符
+                    // 恢复所有转义字符
                     size_t pos = 0;
-                    while ((pos = sdp.find("\\n", pos)) != string::npos) {
-                        sdp.replace(pos, 2, "\n");
-                        pos += 1;
+                    while ((pos = sdp.find("\\", pos)) != string::npos && pos < sdp.length() - 1) {
+                        char next = sdp[pos + 1];
+                        switch (next) {
+                            case 'n': sdp.replace(pos, 2, "\n"); break;
+                            case 'r': sdp.replace(pos, 2, "\r"); break;
+                            case 't': sdp.replace(pos, 2, "\t"); break;
+                            case '"': sdp.replace(pos, 2, "\""); break;
+                            case '\\': sdp.replace(pos, 2, "\\"); pos++; break;  // 跳过下一个字符，避免重复处理
+                            default: pos++; continue;  // 未知转义序列，跳过
+                        }
                     }
                     cout << "[信令] 已获取远程Answer" << endl;
                     return sdp;
@@ -364,11 +371,18 @@ public:
             string candidate = response.substr(candStart, candEnd - candStart);
             string mid = response.substr(midStart, midEnd - midStart);
             
-            // 恢复转义字符
+            // 恢复所有转义字符
             size_t escPos = 0;
-            while ((escPos = candidate.find("\\n", escPos)) != string::npos) {
-                candidate.replace(escPos, 2, "\n");
-                escPos += 1;
+            while ((escPos = candidate.find("\\", escPos)) != string::npos && escPos < candidate.length() - 1) {
+                char next = candidate[escPos + 1];
+                switch (next) {
+                    case 'n': candidate.replace(escPos, 2, "\n"); break;
+                    case 'r': candidate.replace(escPos, 2, "\r"); break;
+                    case 't': candidate.replace(escPos, 2, "\t"); break;
+                    case '"': candidate.replace(escPos, 2, "\""); break;
+                    case '\\': candidate.replace(escPos, 2, "\\"); escPos++; break;
+                    default: escPos++; continue;
+                }
             }
             
             candidates.push_back({mid, candidate});
