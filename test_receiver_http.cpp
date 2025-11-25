@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <mutex>
 #include <iomanip>
 #include <sstream>
 #include <set>
@@ -41,6 +42,7 @@ private:
     string serverUrl;
     string sessionId;
     CURL* curl;
+    mutex curlMutex;  // 保护curl对象的互斥锁
 
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, string* data) {
         data->append((char*)contents, size * nmemb);
@@ -48,6 +50,7 @@ private:
     }
 
     string httpPost(const string& endpoint, const string& jsonData) {
+        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
         
@@ -72,6 +75,7 @@ private:
     }
 
     string httpGet(const string& endpoint) {
+        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
         
@@ -436,7 +440,7 @@ void runReceiver(const string& serverUrl, const string& sessionId,
 }
 
 int main(int argc, char **argv) {
-    string serverUrl = "http://localhost:9355";
+    string serverUrl = "http://localhost:9227";
     string sessionId = "test_session_1";
     size_t expectedFileSizeMB = 500;  // 默认500MB
     string stunServer;

@@ -10,7 +10,7 @@
  *   ./test_sender_http [信令服务器URL] [会话ID] [文件大小(MB)] [消息块大小(字节)] [STUN服务器]
  * 
  * 示例:
- *   ./test_sender_http http://192.168.1.10:9355 test_session_1 500 65535 stun:stun.l.google.com:19302
+ *   ./test_sender_http http://192.168.1.10:9222 test_session_1 500 65535 stun:stun.l.google.com:19302
  *   传输500MB文件，每个消息块65535字节
  */
 
@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <mutex>
 #include <iomanip>
 #include <sstream>
 #include <curl/curl.h>
@@ -40,6 +41,7 @@ private:
     string serverUrl;
     string sessionId;
     CURL* curl;
+    mutex curlMutex;  // 保护curl对象的互斥锁
 
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, string* data) {
         data->append((char*)contents, size * nmemb);
@@ -47,6 +49,7 @@ private:
     }
 
     string httpPost(const string& endpoint, const string& jsonData) {
+        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
         
@@ -71,6 +74,7 @@ private:
     }
 
     string httpGet(const string& endpoint) {
+        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
         
@@ -475,7 +479,7 @@ void runSender(const string& serverUrl, const string& sessionId,
 }
 
 int main(int argc, char **argv) {
-    string serverUrl = "http://localhost:9355";
+    string serverUrl = "http://localhost:9227";
     string sessionId = "test_session_1";
     size_t fileSizeMB = 500;  // 默认500MB
     size_t chunkSize = 65535;  // 默认65535字节

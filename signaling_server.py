@@ -7,9 +7,9 @@ libdatachannel 信令服务器
     python3 signaling_server.py [端口]
 
 示例:
-    python3 signaling_server.py 9355
+    python3 signaling_server.py 9227
 
-默认端口: 9355
+默认端口: 9227
 """
 
 from flask import Flask, request, jsonify
@@ -159,7 +159,7 @@ def clear_session(session_id):
 if __name__ == '__main__':
     import sys
     
-    port = 9355
+    port = 9227
     if len(sys.argv) > 1:
         port = int(sys.argv[1])
     

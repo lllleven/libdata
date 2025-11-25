@@ -100,6 +100,6 @@ RUN ldconfig
 RUN chmod +x /app/signaling_server.py /app/test_sender_http /app/test_receiver_http
 
 # 默认启动信令服务器
-EXPOSE 9355
-CMD ["python3", "/app/signaling_server.py", "9355"]
+EXPOSE 9227
+CMD ["python3", "/app/signaling_server.py", "9227"]
 
