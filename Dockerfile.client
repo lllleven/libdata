@@ -1,0 +1,73 @@
+# 仅包含客户端的镜像（发送端和接收端）
+
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装构建依赖
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 复制源代码
+COPY . /app/
+
+# 初始化子模块
+RUN git submodule update --init --recursive --depth 1 || true
+
+# 构建libdatachannel
+RUN cmake -B build -DUSE_GNUTLS=0 -DUSE_NICE=0 -DCMAKE_BUILD_TYPE=Release \
+    && cd build && make -j$(nproc)
+
+# 编译测试程序
+RUN g++ -std=c++17 test_sender_http.cpp -o test_sender_http \
+    -I./include \
+    -L./build \
+    -ldatachannel \
+    -pthread \
+    -lssl -lcrypto \
+    -lcurl \
+    && g++ -std=c++17 test_receiver_http.cpp -o test_receiver_http \
+    -I./include \
+    -L./build \
+    -ldatachannel \
+    -pthread \
+    -lssl -lcrypto \
+    -lcurl
+
+# 运行时镜像
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    libcurl4 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 从构建阶段复制文件
+COPY --from=builder /app/test_sender_http /app/
+COPY --from=builder /app/test_receiver_http /app/
+COPY --from=builder /app/build/libdatachannel.so* /usr/local/lib/
+COPY --from=builder /app/build/*.so* /usr/local/lib/ 2>/dev/null || true
+
+# 更新库路径
+RUN ldconfig
+
+# 设置可执行权限
+RUN chmod +x /app/test_sender_http /app/test_receiver_http
+
+# 默认启动接收端（可以通过命令覆盖）
+CMD ["/app/test_receiver_http"]
+

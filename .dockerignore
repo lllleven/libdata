@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Test binaries
+test_sender
+test_receiver
+test_sender_http
+test_receiver_http
+test_performance
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!PERFORMANCE_TEST_HTTP_GUIDE.md
+
+# Other
+.DS_Store
+*.log
+

@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # 信令服务器
+  signaling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: libdatachannel-test:latest
+    container_name: libdatachannel-signaling
+    ports:
+      - "9355:9355"
+    command: python3 /app/signaling_server.py 9355
+    networks:
+      - webrtc-test
+    restart: unless-stopped
+
+  # 接收端（等待发送端连接）
+  receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: libdatachannel-test:latest
+    container_name: libdatachannel-receiver
+    depends_on:
+      - signaling
+    command: >
+      sh -c "
+      echo '等待信令服务器启动...' &&
+      sleep 5 &&
+      /app/test_receiver_http 
+        http://signaling:9355 
+        $${SESSION_ID:-test_session_1} 
+        $${FILE_SIZE_MB:-500} 
+        $${STUN_SERVER:-stun:stun.l.google.com:19302}
+      "
+    networks:
+      - webrtc-test
+    environment:
+      - SESSION_ID=${SESSION_ID:-test_session_1}
+      - FILE_SIZE_MB=${FILE_SIZE_MB:-500}
+      - STUN_SERVER=${STUN_SERVER:-stun:stun.l.google.com:19302}
+
+  # 发送端
+  sender:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: libdatachannel-test:latest
+    container_name: libdatachannel-sender
+    depends_on:
+      - signaling
+      - receiver
+    command: >
+      sh -c "
+      echo '等待接收端准备就绪...' &&
+      sleep 10 &&
+      /app/test_sender_http 
+        http://signaling:9355 
+        $${SESSION_ID:-test_session_1} 
+        $${FILE_SIZE_MB:-500} 
+        $${CHUNK_SIZE:-65535} 
+        $${STUN_SERVER:-stun:stun.l.google.com:19302}
+      "
+    networks:
+      - webrtc-test
+    environment:
+      - SESSION_ID=${SESSION_ID:-test_session_1}
+      - FILE_SIZE_MB=${FILE_SIZE_MB:-500}
+      - CHUNK_SIZE=${CHUNK_SIZE:-65535}
+      - STUN_SERVER=${STUN_SERVER:-stun:stun.l.google.com:19302}
+
+networks:
+  webrtc-test:
+    driver: bridge
+
