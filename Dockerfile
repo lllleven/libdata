@@ -99,7 +99,9 @@ RUN ldconfig
 # 设置可执行权限
 RUN chmod +x /app/signaling_server.py /app/test_sender_http /app/test_receiver_http
 
-# 默认启动信令服务器
-EXPOSE 9227
-CMD ["python3", "/app/signaling_server.py", "9227"]
+# 不设置默认启动命令，由用户在启动容器时决定
+# 使用示例：
+# docker run <image> python3 /app/signaling_server.py
+# docker run <image> /app/test_sender_http
+# docker run <image> /app/test_receiver_http
 
