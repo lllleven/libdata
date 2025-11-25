@@ -48,7 +48,13 @@ private:
         return size * nmemb;
     }
 
-    string httpPost(const string& endpoint, const string& jsonData) {
+    string httpPost(const string& endpoint, const string& jsonData, long* httpCode = nullptr) {
+        if (!curl) {
+            cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
+            if (httpCode) *httpCode = 0;
+            return "";
+        }
+        
         lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
@@ -58,6 +64,10 @@ private:
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
+        // 设置超时时间
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
+        
         struct curl_slist* headers = nullptr;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -66,8 +76,17 @@ private:
         curl_slist_free_all(headers);
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << endl;
+            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            if (httpCode) *httpCode = 0;
             return "";
+        }
+        
+        if (httpCode) {
+            CURLcode infoRes = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpCode);
+            if (infoRes != CURLE_OK) {
+                cerr << "[HTTP] 警告: 无法获取HTTP状态码: " << curl_easy_strerror(infoRes) << endl;
+                *httpCode = 0;
+            }
         }
         
         return response;
@@ -102,6 +121,10 @@ private:
         curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        
+        // 设置超时时间（避免无限等待）
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
         
         cout << "[HTTP] 执行curl_easy_perform..." << endl;
         cout.flush();
@@ -144,20 +167,61 @@ public:
     }
 
     void setOffer(const string& sdp) {
-        stringstream json;
-        json << "{\"sdp\":\"" << sdp << "\"}";
+        cout << "[信令] 准备发送Offer，SDP长度: " << sdp.length() << endl;
+        cout.flush();
+        
         // 转义JSON字符串中的特殊字符
-        string jsonStr = json.str();
-        // 简单处理：替换换行符
-        size_t pos = 0;
-        while ((pos = jsonStr.find("\n", pos)) != string::npos) {
-            jsonStr.replace(pos, 1, "\\n");
-            pos += 2;
+        string escapedSdp;
+        for (char c : sdp) {
+            switch (c) {
+                case '"':  escapedSdp += "\\\""; break;
+                case '\\': escapedSdp += "\\\\"; break;
+                case '\n': escapedSdp += "\\n"; break;
+                case '\r': escapedSdp += "\\r"; break;
+                case '\t': escapedSdp += "\\t"; break;
+                default:   escapedSdp += c; break;
+            }
         }
         
+        stringstream json;
+        json << "{\"sdp\":\"" << escapedSdp << "\"}";
+        string jsonStr = json.str();
+        
         string endpoint = "/session/" + sessionId + "/offer";
-        string response = httpPost(endpoint, jsonStr);
-        cout << "[信令] 已发送Offer到服务器" << endl;
+        cout << "[信令] 发送Offer到: " << serverUrl << endpoint << endl;
+        cout.flush();
+        
+        long httpCode = 0;
+        string response = httpPost(endpoint, jsonStr, &httpCode);
+        
+        if (httpCode == 0) {
+            cerr << "[错误] 发送Offer失败：无法连接到服务器" << endl;
+            cerr.flush();
+            return;
+        }
+        
+        if (httpCode != 200) {
+            cerr << "[错误] 发送Offer失败：HTTP状态码 " << httpCode << endl;
+            if (!response.empty()) {
+                cerr << "[错误] 响应内容: " << response.substr(0, min(response.length(), size_t(200))) << endl;
+            }
+            cerr.flush();
+            return;
+        }
+        
+        // 检查响应是否包含错误
+        if (response.find("\"error\"") != string::npos) {
+            cerr << "[错误] 发送Offer失败：服务器返回错误" << endl;
+            cerr << "[错误] 响应内容: " << response.substr(0, min(response.length(), size_t(200))) << endl;
+            cerr.flush();
+            return;
+        }
+        
+        cout << "[信令] 已发送Offer到服务器 (HTTP " << httpCode << ")" << endl;
+        if (!response.empty()) {
+            cout << "[信令] 服务器响应: " << response.substr(0, min(response.length(), size_t(100))) << endl;
+        }
+        cout.flush();
     }
 
     string getAnswer() {
@@ -190,9 +254,16 @@ public:
                 return "";
             }
             
+            // 检查响应内容
+            bool hasError = !response.empty() && response.find("\"error\"") != string::npos;
+            bool hasSdp = !response.empty() && response.find("\"sdp\"") != string::npos;
+            
             // 检查服务器是否可达
             if (firstCheck) {
                 cout << "[信令] 首次检查，HTTP状态码: " << httpCode << ", 响应长度: " << response.length() << endl;
+                if (!response.empty()) {
+                    cout << "[信令] 响应内容: " << response.substr(0, min(response.length(), size_t(200))) << endl;
+                }
                 cout.flush();
                 
                 if (httpCode == 0 || httpCode == -1) {
@@ -201,13 +272,16 @@ public:
                     cerr << "[错误] 响应内容: " << (response.empty() ? "(空)" : response.substr(0, 200)) << endl;
                     cerr.flush();
                     return "";
-                } else if (httpCode == 200) {
+                } else if (httpCode == 200 && hasSdp) {
                     serverReachable = true;
                     cout << "[信令] 信令服务器连接正常，已收到Answer" << endl;
                     cout.flush();
-                } else if (httpCode == 404) {
+                } else if (httpCode == 404 || (httpCode == 200 && hasError)) {
                     serverReachable = true;
                     cout << "[信令] 信令服务器连接正常，等待接收端发送Answer..." << endl;
+                    if (hasError) {
+                        cout << "[信令] 服务器响应: " << response.substr(0, min(response.length(), size_t(100))) << endl;
+                    }
                     cout.flush();
                 } else {
                     cerr << "[错误] 信令服务器返回错误状态码: " << httpCode << endl;
@@ -218,7 +292,17 @@ public:
                 firstCheck = false;
             }
             
-            if (!response.empty() && response.find("\"sdp\"") != string::npos) {
+            // 如果响应包含错误信息，继续等待（不返回）
+            if (hasError && !hasSdp) {
+                // 404 或包含 error 的响应，继续等待
+                this_thread::sleep_for(1s);
+                if (i % 5 == 0) {
+                    cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
+                }
+                continue;
+            }
+            
+            if (hasSdp) {
                 // 简单解析JSON
                 size_t sdpStart = response.find("\"sdp\":\"") + 7;
                 size_t sdpEnd = response.find("\"", sdpStart);
@@ -233,19 +317,13 @@ public:
                     cout << "[信令] 已获取远程Answer" << endl;
                     return sdp;
                 }
-            } else if (httpCode == 404) {
-                // 404 表示还没有 Answer，继续等待
-            } else if (httpCode != 200 && httpCode != 0) {
-                cerr << "[错误] 获取Answer时服务器返回错误: HTTP " << httpCode << endl;
-                if (!response.empty()) {
-                    cerr << "[错误] 响应内容: " << response << endl;
+            } else {
+                // 其他情况（404 或包含 error），继续等待
+                this_thread::sleep_for(1s);
+                if (i % 5 == 0) {
+                    cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
                 }
-                return "";
-            }
-            
-            this_thread::sleep_for(1s);
-            if (i % 5 == 0) {
-                cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
+                continue;
             }
         }
         

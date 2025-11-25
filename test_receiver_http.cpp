@@ -50,6 +50,11 @@ private:
     }
 
     string httpPost(const string& endpoint, const string& jsonData) {
+        if (!curl) {
+            cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
+            return "";
+        }
+        
         lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
@@ -59,6 +64,10 @@ private:
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
+        // 设置超时时间
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
+        
         struct curl_slist* headers = nullptr;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -67,7 +76,7 @@ private:
         curl_slist_free_all(headers);
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << endl;
+            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
             return "";
         }
         
@@ -75,6 +84,11 @@ private:
     }
 
     string httpGet(const string& endpoint) {
+        if (!curl) {
+            cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
+            return "";
+        }
+        
         lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
         string response;
         string url = serverUrl + endpoint;
@@ -84,10 +98,14 @@ private:
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
+        // 设置超时时间
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
+        
         CURLcode res = curl_easy_perform(curl);
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << endl;
+            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
             return "";
         }
         
@@ -138,6 +156,9 @@ public:
     }
 
     void setAnswer(const string& sdp) {
+        cout << "[信令] 准备发送Answer，SDP长度: " << sdp.length() << endl;
+        cout.flush();
+        
         stringstream json;
         json << "{\"sdp\":\"" << sdp << "\"}";
         string jsonStr = json.str();
@@ -149,8 +170,16 @@ public:
         }
         
         string endpoint = "/session/" + sessionId + "/answer";
-        httpPost(endpoint, jsonStr);
+        cout << "[信令] 发送Answer到: " << serverUrl << endpoint << endl;
+        cout.flush();
+        
+        string response = httpPost(endpoint, jsonStr);
+        
+        if (!response.empty()) {
+            cout << "[信令] 服务器响应: " << response.substr(0, min(response.length(), size_t(100))) << endl;
+        }
         cout << "[信令] 已发送Answer到服务器" << endl;
+        cout.flush();
     }
 
     void addCandidate(const string& candidate, const string& mid, bool isSender) {
@@ -278,6 +307,8 @@ void runReceiver(const string& serverUrl, const string& sessionId,
 
     // 当生成本地描述时，发送到服务器
     pc.onLocalDescription([&signaling](Description sdp) {
+        cout << "[信令] onLocalDescription 回调被触发，准备发送Answer" << endl;
+        cout.flush();
         signaling.setAnswer(string(sdp));
     });
 
@@ -295,16 +326,27 @@ void runReceiver(const string& serverUrl, const string& sessionId,
     });
 
     cout << "[信令] 等待发送端Offer..." << endl;
+    cout.flush();
 
     // 读取远程offer
     string offerSdp = signaling.getOffer();
     if (offerSdp.empty()) {
         cerr << "[错误] 未能获取远程Offer" << endl;
+        cerr.flush();
         return;
     }
 
+    cout << "[信令] 已获取Offer，SDP长度: " << offerSdp.length() << endl;
+    cout.flush();
+
+    cout << "[信令] 设置远程Offer..." << endl;
+    cout.flush();
     pc.setRemoteDescription(Description(offerSdp));
-    cout << "[信令] 已设置远程Offer" << endl;
+    cout << "[信令] 已设置远程Offer，等待生成Answer..." << endl;
+    cout.flush();
+    
+    // 给一点时间让 Answer 生成
+    this_thread::sleep_for(500ms);
 
     // 持续读取并添加远程候选者
     thread candidateReader([&pc, &signaling]() {
