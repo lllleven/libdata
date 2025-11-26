@@ -66,7 +66,8 @@ int main(int argc, char *argv[]) {
     const std::optional<std::string> stunServer = (argc >= 5 ? std::optional<std::string>(argv[4]) : std::nullopt);
     const uint64_t totalBytes = expectedMb * 1024ull * 1024ull;
 
-    std::cout << "[接收] 信令地址: " << signalingUrl << " 会话: " << sessionId << "\n";
+    std::cout << "[接收] 信令地址: " << signalingUrl << " 会话: " << sessionId
+              << " 目标: " << expectedMb << "MB\n";
     Configuration config;
     if (stunServer)
         config.iceServers.emplace_back(*stunServer);
@@ -143,6 +144,7 @@ int main(int argc, char *argv[]) {
     auto waitForOffer = [&]() {
         auto lastLog = std::chrono::steady_clock::now();
         std::cout << "[接收] 等待 Offer...\n";
+        auto lastSkipLog = std::chrono::steady_clock::now();
         while (true) {
             try {
                 auto offer = signaling.fetchOffer(sessionId);
@@ -152,7 +154,11 @@ int main(int argc, char *argv[]) {
 
                 Description description(*offer);
                 if (description.type() != Description::Type::Offer) {
-                    std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")\n";
+                    auto now = std::chrono::steady_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSkipLog).count() >= 10) {
+                        std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")\n";
+                        lastSkipLog = now;
+                    }
                     continue;
                 }
 
