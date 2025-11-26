@@ -244,6 +244,11 @@ int main(int argc, char *argv[]) {
 
     dataChannel->close();
     pc.close();
+    try {
+        signaling.clearSession(sessionId);
+    } catch (const std::exception &e) {
+        std::cerr << "清理会话失败: " << e.what() << "\n";
+    }
 
     auto endTime = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);

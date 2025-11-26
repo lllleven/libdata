@@ -180,6 +180,7 @@ int main(int argc, char *argv[]) {
                 std::cout << "[接收] 设置远端描述 (Offer):\n" << offerSdp << std::endl;
                 pc.setRemoteDescription(description);
                 pc.setLocalDescription(Description::Type::Answer);
+                signaling.clearSession(sessionId);
                 return;
             } catch (const std::exception &e) {
                 std::cerr << "获取 Offer 失败: " << e.what() << "\n";

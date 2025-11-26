@@ -75,6 +75,10 @@ public:
 		return parseCandidates(payload);
 	}
 
+	void clearSession(const std::string &session) const {
+		httpDelete(buildPath(session, ""), true);
+	}
+
 private:
 	static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userdata) {
 		auto *buffer = static_cast<std::string *>(userdata);
@@ -167,6 +171,35 @@ private:
 			throw std::runtime_error("Signaling request returned HTTP " + std::to_string(http_code));
 
 		return response;
+	}
+
+	void httpDelete(const std::string &endpoint, bool ignore_not_found) const {
+		std::string url = base_url_ + endpoint;
+		CURL *curl = curl_easy_init();
+		if (!curl)
+			throw std::runtime_error("Failed to initialize libcurl");
+
+		std::string response;
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		auto code = curl_easy_perform(curl);
+		long http_code = 0;
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		curl_easy_cleanup(curl);
+
+		if (code != CURLE_OK)
+			throw std::runtime_error("Signaling request failed: " + std::string(curl_easy_strerror(code)));
+
+		if (http_code == 404 && ignore_not_found)
+			return;
+
+		if (http_code >= 400)
+			throw std::runtime_error("Signaling DELETE returned HTTP " + std::to_string(http_code));
 	}
 
 	std::string urlEncode(const std::string &value) const {
