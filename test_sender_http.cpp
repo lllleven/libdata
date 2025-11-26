@@ -17,6 +17,7 @@
 #include "rtc/rtc.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -632,20 +633,40 @@ void runSender(const string& serverUrl, const string& sessionId,
     // 持续读取并添加远程候选者
     thread candidateReader([&pc, &signaling]() {
         set<string> addedCandidates;
-        while (pc.state() != PeerConnection::State::Closed) {
+        int idleCount = 0;
+
+        while (true) {
+            auto state = pc.state();
+            if (state == PeerConnection::State::Closed ||
+                state == PeerConnection::State::Connected ||
+                state == PeerConnection::State::Failed ||
+                state == PeerConnection::State::Disconnected) {
+                break;
+            }
+
             auto candidates = signaling.getRemoteCandidates(true);
+            bool hasNew = false;
             for (const auto& [mid, candidate] : candidates) {
                 string key = mid + "|" + candidate;
                 if (addedCandidates.find(key) == addedCandidates.end()) {
                     try {
                         pc.addRemoteCandidate(Candidate(candidate, mid));
                         addedCandidates.insert(key);
+                        hasNew = true;
                     } catch (...) {
                         // 忽略重复添加的错误
                     }
                 }
             }
-            this_thread::sleep_for(500ms);
+
+            if (hasNew) {
+                idleCount = 0;
+            } else {
+                idleCount = min(idleCount + 1, 20);
+            }
+
+            auto waitDuration = idleCount > 5 ? 1s : 500ms;
+            this_thread::sleep_for(waitDuration);
         }
     });
 
