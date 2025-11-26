@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <variant>
 
 using std::shared_ptr;
 using std::weak_ptr;
@@ -124,8 +125,8 @@ int main(int argc, char *argv[]) {
         });
 
         channel->onMessage([&](variant<binary, string> message) {
-            if (holds_alternative<binary>(message)) {
-                receivedBytes += get<binary>(message).size();
+            if (std::holds_alternative<binary>(message)) {
+                receivedBytes += std::get<binary>(message).size();
                 if (totalBytes > 0 && receivedBytes.load() >= totalBytes)
                     receiveFinished.store(true);
             }

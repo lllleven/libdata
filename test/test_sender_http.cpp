@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <variant>
 
 using std::shared_ptr;
 using std::weak_ptr;
