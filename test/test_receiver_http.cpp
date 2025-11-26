@@ -156,10 +156,11 @@ int main(int argc, char *argv[]) {
                 }
 
                 Description description(*offer);
+                description.hintType(Description::Type::Offer);
                 if (description.type() != Description::Type::Offer) {
                     auto now = std::chrono::steady_clock::now();
                     if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSkipLog).count() >= 10) {
-            std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")" << std::endl;
+                        std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")" << std::endl;
                         lastSkipLog = now;
                     }
                     continue;
