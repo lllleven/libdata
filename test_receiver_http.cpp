@@ -27,6 +27,7 @@
 #include <set>
 #include <map>
 #include <curl/curl.h>
+#include <ctime>
 
 using namespace rtc;
 using namespace std;
@@ -35,6 +36,23 @@ using namespace chrono_literals;
 using chrono::duration_cast;
 using chrono::milliseconds;
 using chrono::steady_clock;
+using chrono::system_clock;
+
+string currentTimestamp() {
+    auto now = system_clock::now();
+    auto tt = system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
+    char buf[16];
+    if (std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm)) {
+        return string(buf);
+    }
+    return {};
+}
 
 template <class T> weak_ptr<T> make_weak_ptr(shared_ptr<T> ptr) { return ptr; }
 
@@ -344,14 +362,14 @@ void runReceiver(const string& serverUrl, const string& sessionId,
                 // 每接收10MB显示一次进度
                 if (receivedBytes.load() % (10 * 1024 * 1024) < bin.size()) {
                     double progress = (receivedBytes.load() * 100.0) / expectedBytes;
-                    cout << "[进度] " << fixed << setprecision(1) << progress 
+                    cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress 
                          << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
                          << (expectedBytes / 1024 / 1024) << " MB)" << endl;
                 }
                 auto logged = lastLoggedBytes.load();
                 auto current = receivedBytes.load();
                 if (current - logged >= 256 * 1024) {
-                    cout << "[接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB, chunk 大小 " 
+                    cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB, chunk 大小 " 
                          << bin.size() << " 字节" << endl;
                     lastLoggedBytes = current;
                 }
