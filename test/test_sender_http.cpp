@@ -98,6 +98,7 @@ int main(int argc, char *argv[]) {
         sendFinished.store(true);
 
     candidateThread = std::thread([&] {
+        std::cout << "[发送] 候选线程启动" << std::endl;
         while (running.load()) {
             try {
                 if (!pc.remoteDescription()) {
@@ -105,12 +106,17 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
 
+                bool added = false;
                 for (const auto &entry : signaling.fetchReceiverCandidates(sessionId)) {
                     const std::string key = entry.candidate + "|" + entry.mid;
                     if (seenCandidates.insert(key).second) {
                         pc.addRemoteCandidate(Candidate(entry.candidate, entry.mid));
+                        std::cout << "[发送] 添加接收候选: mid=" << entry.mid << std::endl;
+                        added = true;
                     }
                 }
+                if (!added)
+                    std::cout << "[发送] 暂无新接收候选" << std::endl;
             } catch (const std::exception &e) {
                 std::cerr << "获取接收端候选者失败: " << e.what() << "\n";
             }
@@ -120,7 +126,12 @@ int main(int argc, char *argv[]) {
 
     pc.onLocalDescription([&](Description description) {
         try {
-            signaling.setOffer(sessionId, static_cast<std::string>(description));
+            std::cout << "[发送] 本地描述就绪，写 Offer ->" << std::endl;
+            const auto sdp = static_cast<std::string>(description);
+            std::cout << "[发送] Offer SDP:\n"
+                      << sdp << std::endl;
+            signaling.setOffer(sessionId, sdp);
+            std::cout << "[发送] Offer 写入信令" << std::endl;
         } catch (const std::exception &e) {
             std::cerr << "发送 Offer 失败: " << e.what() << "\n";
         }
@@ -204,7 +215,7 @@ int main(int argc, char *argv[]) {
             std::this_thread::sleep_for(pollInterval);
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::seconds>(now - lastLog).count() >= 5) {
-                std::cout << "[发送] 仍在等待 Answer..." << std::endl;
+            std::cout << "[发送] 仍在等待 Answer..." << std::endl;
                 lastLog = now;
             }
         }

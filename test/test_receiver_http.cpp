@@ -85,14 +85,20 @@ int main(int argc, char *argv[]) {
     std::unordered_set<std::string> seenCandidates;
 
     candidateThread = std::thread([&] {
+        std::cout << "[接收] 候选线程启动" << std::endl;
         while (running.load()) {
             try {
+                size_t added = 0;
                 for (const auto &entry : signaling.fetchSenderCandidates(sessionId)) {
                     const std::string key = entry.candidate + "|" + entry.mid;
                     if (seenCandidates.insert(key).second) {
                         pc.addRemoteCandidate(Candidate(entry.candidate, entry.mid));
+                        ++added;
+                        std::cout << "[接收] 添加发送端候选: mid=" << entry.mid << std::endl;
                     }
                 }
+                if (added == 0)
+                    std::cout << "[接收] 暂无新发送端候选" << std::endl;
             } catch (const std::exception &e) {
                 std::cerr << "获取发送端候选者失败: " << e.what() << "\n";
             }
@@ -102,7 +108,11 @@ int main(int argc, char *argv[]) {
 
     pc.onLocalDescription([&](Description description) {
         try {
-            signaling.setAnswer(sessionId, static_cast<std::string>(description));
+            std::cout << "[接收] 本地描述就绪，写 Answer ->" << std::endl;
+            const auto answerSdp = static_cast<std::string>(description);
+            std::cout << "[接收] Answer SDP:\n" << answerSdp << std::endl;
+            signaling.setAnswer(sessionId, answerSdp);
+            std::cout << "[接收] Answer 写入信令" << std::endl;
         } catch (const std::exception &e) {
             std::cerr << "发送 Answer 失败: " << e.what() << "\n";
         }
@@ -166,6 +176,8 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
 
+                const auto offerSdp = static_cast<std::string>(description);
+                std::cout << "[接收] 设置远端描述 (Offer):\n" << offerSdp << std::endl;
                 pc.setRemoteDescription(description);
                 pc.setLocalDescription(Description::Type::Answer);
                 return;
