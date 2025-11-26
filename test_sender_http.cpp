@@ -24,6 +24,7 @@
 #include <mutex>
 #include <iomanip>
 #include <sstream>
+#include <map>
 #include <curl/curl.h>
 
 using namespace rtc;
@@ -48,35 +49,59 @@ private:
         return size * nmemb;
     }
 
-    string httpPost(const string& endpoint, const string& jsonData, long* httpCode = nullptr) {
+    // URL编码辅助函数
+    string urlEncode(const string& str) {
+        if (!curl) return str;
+        char* encoded = curl_easy_escape(curl, str.c_str(), str.length());
+        if (!encoded) return str;
+        string result(encoded);
+        curl_free(encoded);
+        return result;
+    }
+    
+    // 使用GET方法发送数据（通过查询参数）
+    string httpGetWithParams(const string& endpoint, const map<string, string>& params, long* httpCode = nullptr) {
         if (!curl) {
             cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
             if (httpCode) *httpCode = 0;
             return "";
         }
         
-        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
+        lock_guard<mutex> lock(curlMutex);
         string response;
         string url = serverUrl + endpoint;
         
+        // 构建查询参数
+        if (!params.empty()) {
+            url += "?";
+            bool first = true;
+            for (const auto& [key, value] : params) {
+                if (!first) url += "&";
+                url += key + "=" + urlEncode(value);
+                first = false;
+            }
+        }
+        
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonData.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
         // 设置超时时间
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
         
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        
-        CURLcode res = curl_easy_perform(curl);
-        curl_slist_free_all(headers);
+        CURLcode res;
+        try {
+            res = curl_easy_perform(curl);
+        } catch (...) {
+            cerr << "[HTTP] curl_easy_perform 抛出异常" << endl;
+            if (httpCode) *httpCode = 0;
+            return "";
+        }
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
             if (httpCode) *httpCode = 0;
             return "";
         }
@@ -129,13 +154,22 @@ private:
         cout << "[HTTP] 执行curl_easy_perform..." << endl;
         cout.flush();
         
-        CURLcode res = curl_easy_perform(curl);
+        CURLcode res;
+        try {
+            res = curl_easy_perform(curl);
+        } catch (...) {
+            cerr << "[HTTP] curl_easy_perform 抛出异常" << endl;
+            cerr.flush();
+            if (httpCode) *httpCode = 0;
+            return "";
+        }
         
         cout << "[HTTP] curl_easy_perform 返回，结果: " << res << " (" << curl_easy_strerror(res) << ")" << endl;
         cout.flush();
         
         if (res != CURLE_OK) {
             cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            cerr.flush();
             if (httpCode) *httpCode = 0;
             return "";
         }
@@ -170,29 +204,15 @@ public:
         cout << "[信令] 准备发送Offer，SDP长度: " << sdp.length() << endl;
         cout.flush();
         
-        // 转义JSON字符串中的特殊字符
-        string escapedSdp;
-        for (char c : sdp) {
-            switch (c) {
-                case '"':  escapedSdp += "\\\""; break;
-                case '\\': escapedSdp += "\\\\"; break;
-                case '\n': escapedSdp += "\\n"; break;
-                case '\r': escapedSdp += "\\r"; break;
-                case '\t': escapedSdp += "\\t"; break;
-                default:   escapedSdp += c; break;
-            }
-        }
-        
-        stringstream json;
-        json << "{\"sdp\":\"" << escapedSdp << "\"}";
-        string jsonStr = json.str();
-        
         string endpoint = "/session/" + sessionId + "/offer";
+        map<string, string> params;
+        params["sdp"] = sdp;
+        
         cout << "[信令] 发送Offer到: " << serverUrl << endpoint << endl;
         cout.flush();
         
         long httpCode = 0;
-        string response = httpPost(endpoint, jsonStr, &httpCode);
+        string response = httpGetWithParams(endpoint, params, &httpCode);
         
         if (httpCode == 0) {
             cerr << "[错误] 发送Offer失败：无法连接到服务器" << endl;
@@ -209,7 +229,6 @@ public:
             return;
         }
         
-        // 检查响应是否包含错误
         if (response.find("\"error\"") != string::npos) {
             cerr << "[错误] 发送Offer失败：服务器返回错误" << endl;
             cerr << "[错误] 响应内容: " << response.substr(0, min(response.length(), size_t(200))) << endl;
@@ -243,6 +262,9 @@ public:
                 response = httpGet(endpoint, &httpCode);
                 
                 cout << "[信令] httpGet 返回，状态码: " << httpCode << ", 响应长度: " << response.length() << endl;
+                if (!response.empty() && response.length() < 500) {
+                    cout << "[信令] 响应内容: " << response << endl;
+                }
                 cout.flush();
             } catch (const exception& e) {
                 cerr << "[错误] httpGet异常: " << e.what() << endl;
@@ -252,6 +274,18 @@ public:
                 cerr << "[错误] httpGet发生未知异常" << endl;
                 cerr.flush();
                 return "";
+            }
+            
+            // 如果 httpGet 返回空且状态码为0，说明连接失败
+            if (response.empty() && httpCode == 0) {
+                cerr << "[错误] 无法连接到信令服务器，httpGet 返回空响应" << endl;
+                cerr.flush();
+                if (firstCheck) {
+                    return "";  // 第一次就失败，直接返回
+                }
+                // 不是第一次，继续重试
+                this_thread::sleep_for(1s);
+                continue;
             }
             
             // 检查响应内容
@@ -326,9 +360,9 @@ public:
                 }
             } else {
                 // 其他情况（404 或包含 error），继续等待
-                this_thread::sleep_for(1s);
-                if (i % 5 == 0) {
-                    cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
+            this_thread::sleep_for(1s);
+            if (i % 5 == 0) {
+                cout << "[信令] 等待远程Answer... (" << i << "秒)" << endl;
                 }
                 continue;
             }
@@ -341,12 +375,11 @@ public:
     }
 
     void addCandidate(const string& candidate, const string& mid, bool isSender) {
-        stringstream json;
-        json << "{\"candidate\":\"" << candidate << "\",\"mid\":\"" << mid << "\"}";
-        string jsonStr = json.str();
-        
         string endpoint = "/session/" + sessionId + "/candidate/" + (isSender ? "sender" : "receiver");
-        httpPost(endpoint, jsonStr);
+        map<string, string> params;
+        params["candidate"] = candidate;
+        params["mid"] = mid;
+        httpGetWithParams(endpoint, params);
     }
 
     vector<pair<string, string>> getRemoteCandidates(bool isSender) {
@@ -569,9 +602,13 @@ void runSender(const string& serverUrl, const string& sessionId,
     } catch (const exception& e) {
         cerr << "[错误] getAnswer() 异常: " << e.what() << endl;
         cerr.flush();
+        cerr << "[错误] 程序退出" << endl;
+        cerr.flush();
         return;
     } catch (...) {
         cerr << "[错误] getAnswer() 发生未知异常" << endl;
+        cerr.flush();
+        cerr << "[错误] 程序退出" << endl;
         cerr.flush();
         return;
     }
@@ -582,8 +619,12 @@ void runSender(const string& serverUrl, const string& sessionId,
         cerr << "  1. 信令服务器正在运行 (http://localhost:9227)" << endl;
         cerr << "  2. 接收端已启动并连接到信令服务器" << endl;
         cerr << "  3. 接收端和发送端使用相同的会话ID: " << sessionId << endl;
+        cerr.flush();
         return;
     }
+    
+    cout << "[信令] 成功获取Answer，准备设置远程描述..." << endl;
+    cout.flush();
 
     pc.setRemoteDescription(Description(answerSdp));
     cout << "[信令] 已设置远程Answer" << endl;

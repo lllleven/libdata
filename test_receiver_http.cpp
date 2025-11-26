@@ -25,6 +25,7 @@
 #include <iomanip>
 #include <sstream>
 #include <set>
+#include <map>
 #include <curl/curl.h>
 
 using namespace rtc;
@@ -49,35 +50,52 @@ private:
         return size * nmemb;
     }
 
-    string httpPost(const string& endpoint, const string& jsonData, long* httpCode = nullptr) {
+    // URL编码辅助函数
+    string urlEncode(const string& str) {
+        if (!curl) return str;
+        char* encoded = curl_easy_escape(curl, str.c_str(), str.length());
+        if (!encoded) return str;
+        string result(encoded);
+        curl_free(encoded);
+        return result;
+    }
+    
+    // 使用GET方法发送数据（通过查询参数）
+    string httpGetWithParams(const string& endpoint, const map<string, string>& params, long* httpCode = nullptr) {
         if (!curl) {
             cerr << "[HTTP] 错误: CURL对象未初始化" << endl;
             if (httpCode) *httpCode = 0;
             return "";
         }
         
-        lock_guard<mutex> lock(curlMutex);  // 保护curl对象访问
+        lock_guard<mutex> lock(curlMutex);
         string response;
         string url = serverUrl + endpoint;
         
+        // 构建查询参数
+        if (!params.empty()) {
+            url += "?";
+            bool first = true;
+            for (const auto& [key, value] : params) {
+                if (!first) url += "&";
+                url += key + "=" + urlEncode(value);
+                first = false;
+            }
+        }
+        
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonData.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         
         // 设置超时时间
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时10秒
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);        // 总超时10秒
-        
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
         
         CURLcode res = curl_easy_perform(curl);
-        curl_slist_free_all(headers);
         
         if (res != CURLE_OK) {
-            cerr << "[HTTP] POST失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
+            cerr << "[HTTP] GET失败: " << curl_easy_strerror(res) << " (URL: " << url << ")" << endl;
             if (httpCode) *httpCode = 0;
             return "";
         }
@@ -176,29 +194,15 @@ public:
         cout << "[信令] 准备发送Answer，SDP长度: " << sdp.length() << endl;
         cout.flush();
         
-        // 转义JSON字符串中的特殊字符
-        string escapedSdp;
-        for (char c : sdp) {
-            switch (c) {
-                case '"':  escapedSdp += "\\\""; break;
-                case '\\': escapedSdp += "\\\\"; break;
-                case '\n': escapedSdp += "\\n"; break;
-                case '\r': escapedSdp += "\\r"; break;
-                case '\t': escapedSdp += "\\t"; break;
-                default:   escapedSdp += c; break;
-            }
-        }
-        
-        stringstream json;
-        json << "{\"sdp\":\"" << escapedSdp << "\"}";
-        string jsonStr = json.str();
-        
         string endpoint = "/session/" + sessionId + "/answer";
+        map<string, string> params;
+        params["sdp"] = sdp;
+        
         cout << "[信令] 发送Answer到: " << serverUrl << endpoint << endl;
         cout.flush();
         
         long httpCode = 0;
-        string response = httpPost(endpoint, jsonStr, &httpCode);
+        string response = httpGetWithParams(endpoint, params, &httpCode);
         
         if (httpCode == 0) {
             cerr << "[错误] 发送Answer失败：无法连接到服务器" << endl;
@@ -223,12 +227,11 @@ public:
     }
 
     void addCandidate(const string& candidate, const string& mid, bool isSender) {
-        stringstream json;
-        json << "{\"candidate\":\"" << candidate << "\",\"mid\":\"" << mid << "\"}";
-        string jsonStr = json.str();
-        
         string endpoint = "/session/" + sessionId + "/candidate/" + (isSender ? "sender" : "receiver");
-        httpPost(endpoint, jsonStr);
+        map<string, string> params;
+        params["candidate"] = candidate;
+        params["mid"] = mid;
+        httpGetWithParams(endpoint, params);
     }
 
     vector<pair<string, string>> getRemoteCandidates(bool isSender) {
