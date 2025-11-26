@@ -563,9 +563,6 @@ int main(int argc, char **argv) {
     size_t expectedFileSizeMB = 500;  // 默认500MB
     string stunServer;
 
-    static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::debug, &consoleAppender);
-
     if (argc > 1) {
         serverUrl = argv[1];
     }
