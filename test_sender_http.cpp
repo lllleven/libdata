@@ -514,10 +514,12 @@ void runSender(const string& serverUrl, const string& sessionId,
                     
                     if (toSend == chunkSize) {
                         dc->send(chunkData);
+                        cout << "[发送] 已推进 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                     } else {
                         // 发送最后一个不完整的块
                         binary lastChunk(chunkData.begin(), chunkData.begin() + toSend);
                         dc->send(lastChunk);
+                        cout << "[发送] 已发送最后一块 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                     }
                     
                     currentSent += toSend;
@@ -531,6 +533,12 @@ void runSender(const string& serverUrl, const string& sessionId,
                              << "% (" << (sentBytes.load() / 1024 / 1024) << " MB)" << endl;
                     }
                 } else {
+                    static auto lastBufferLog = steady_clock::now();
+                    auto now = steady_clock::now();
+                    if (duration_cast<seconds>(now - lastBufferLog) >= 1s) {
+                        cout << "[发送] 等待缓冲清空, bufferedAmount=" << dc->bufferedAmount() << endl;
+                        lastBufferLog = now;
+                    }
                     this_thread::sleep_for(1ms);
                 }
             }
