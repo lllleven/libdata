@@ -28,6 +28,7 @@
 #include <map>
 #include <curl/curl.h>
 #include <cctype>
+#include <cctype>
 
 using namespace rtc;
 using namespace std;
@@ -794,9 +795,8 @@ int main(int argc, char **argv) {
     }
     if (argc > 4) {
         chunkSize = atoi(argv[4]);
-        const size_t maxChunk = 262144;
-        if (chunkSize <= 0 || chunkSize > static_cast<int>(maxChunk)) {
-            cerr << "错误: 消息块大小必须在1-" << maxChunk << "字节之间" << endl;
+        if (chunkSize <= 0) {
+            cerr << "错误: 消息块大小必须大于0字节" << endl;
             return -1;
         }
     }
@@ -805,9 +805,8 @@ int main(int argc, char **argv) {
         bool isNumber = !arg5.empty() && (arg5[0] == '+' || arg5[0] == '-' || isdigit(arg5[0]));
         if (isNumber) {
             bufferThreshold = atoi(arg5.c_str());
-            const size_t maxBuffer = 1048576;
-            if (bufferThreshold <= 0 || bufferThreshold > static_cast<int>(maxBuffer)) {
-                cerr << "错误: buffer 阈值必须在1-" << maxBuffer << "字节之间" << endl;
+            if (bufferThreshold <= 0) {
+                cerr << "错误: buffer 阈值必须大于0字节" << endl;
                 return -1;
             }
             if (argc > 6) {
@@ -816,10 +815,6 @@ int main(int argc, char **argv) {
         } else {
             stunServer = arg5;
         }
-    }
-
-    if (bufferThreshold < chunkSize) {
-        bufferThreshold = chunkSize;
     }
 
     // 初始化CURL
