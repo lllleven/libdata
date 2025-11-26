@@ -47,6 +47,7 @@ RUN cmake -B build \
 
 # 编译测试程序
 RUN g++ -std=c++17 test_sender_http.cpp -o test_sender_http \
+    -Ideps/plog/include \
     -I./include \
     -L./build \
     -Wl,-rpath,/usr/local/lib \
