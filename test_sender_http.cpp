@@ -27,6 +27,7 @@
 #include <sstream>
 #include <map>
 #include <curl/curl.h>
+#include <cctype>
 
 using namespace rtc;
 using namespace std;
@@ -429,7 +430,8 @@ public:
 };
 
 void runSender(const string& serverUrl, const string& sessionId, 
-               size_t fileSizeMB, size_t chunkSize, const string& stunServer) {
+               size_t fileSizeMB, size_t chunkSize, size_t bufferThreshold,
+               const string& stunServer) {
     size_t totalBytes = fileSizeMB * 1024 * 1024;  // 转换为字节
     
     cout << "========================================" << endl;
@@ -493,7 +495,7 @@ void runSender(const string& serverUrl, const string& sessionId,
     auto dc = pc.createDataChannel("file_transfer");
 
     dc->onOpen([wdc = make_weak_ptr(dc), &chunkData, &openTime, &transferStartTime, &startTime,
-                &sentBytes, &sentChunks, totalBytes, chunkSize]() {
+                &sentBytes, &sentChunks, totalBytes, chunkSize, bufferThreshold]() {
         auto dc = wdc.lock();
         if (!dc)
             return;
@@ -509,7 +511,7 @@ void runSender(const string& serverUrl, const string& sessionId,
         try {
             size_t currentSent = 0;
             while (dc->isOpen() && currentSent < totalBytes) {
-                if (dc->bufferedAmount() < chunkSize) {
+                if (dc->bufferedAmount() < bufferThreshold) {
                     size_t remaining = totalBytes - currentSent;
                     size_t toSend = min(remaining, chunkSize);
                     
@@ -551,14 +553,14 @@ void runSender(const string& serverUrl, const string& sessionId,
 
     // 当缓冲区降低时继续发送
     dc->onBufferedAmountLow([wdc = make_weak_ptr(dc), &chunkData, 
-                              &sentBytes, &sentChunks, totalBytes, chunkSize]() {
+                              &sentBytes, &sentChunks, totalBytes, chunkSize, bufferThreshold]() {
         auto dc = wdc.lock();
         if (!dc)
             return;
 
         try {
             size_t currentSent = sentBytes.load();
-            while (dc->isOpen() && currentSent < totalBytes && dc->bufferedAmount() < chunkSize) {
+            while (dc->isOpen() && currentSent < totalBytes && dc->bufferedAmount() < bufferThreshold) {
                 size_t remaining = totalBytes - currentSent;
                 size_t toSend = min(remaining, chunkSize);
                 
@@ -774,6 +776,7 @@ int main(int argc, char **argv) {
     string sessionId = "test_session_1";
     size_t fileSizeMB = 500;  // 默认500MB
     size_t chunkSize = 65535;  // 默认65535字节
+    size_t bufferThreshold = chunkSize;
     string stunServer;
 
     if (argc > 1) {
@@ -791,20 +794,39 @@ int main(int argc, char **argv) {
     }
     if (argc > 4) {
         chunkSize = atoi(argv[4]);
-        if (chunkSize <= 0 || chunkSize > 65535) {
-            cerr << "错误: 消息块大小必须在1-65535字节之间" << endl;
+        const size_t maxChunk = 262144;
+        if (chunkSize <= 0 || chunkSize > static_cast<int>(maxChunk)) {
+            cerr << "错误: 消息块大小必须在1-" << maxChunk << "字节之间" << endl;
             return -1;
         }
     }
     if (argc > 5) {
-        stunServer = argv[5];
+        string arg5 = argv[5];
+        bool isNumber = !arg5.empty() && (arg5[0] == '+' || arg5[0] == '-' || isdigit(arg5[0]));
+        if (isNumber) {
+            bufferThreshold = atoi(arg5.c_str());
+            const size_t maxBuffer = 1048576;
+            if (bufferThreshold <= 0 || bufferThreshold > static_cast<int>(maxBuffer)) {
+                cerr << "错误: buffer 阈值必须在1-" << maxBuffer << "字节之间" << endl;
+                return -1;
+            }
+            if (argc > 6) {
+                stunServer = argv[6];
+            }
+        } else {
+            stunServer = arg5;
+        }
+    }
+
+    if (bufferThreshold < chunkSize) {
+        bufferThreshold = chunkSize;
     }
 
     // 初始化CURL
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     try {
-        runSender(serverUrl, sessionId, fileSizeMB, chunkSize, stunServer);
+        runSender(serverUrl, sessionId, fileSizeMB, chunkSize, bufferThreshold, stunServer);
         curl_global_cleanup();
         return 0;
     } catch (const std::exception &e) {
