@@ -74,6 +74,7 @@ int main(int argc, char *argv[]) {
     const std::optional<std::string> stunServer = (argc >= 6 ? std::optional<std::string>(argv[5]) : std::nullopt);
     const uint64_t totalBytes = fileMb * 1024ull * 1024ull;
 
+    std::cout << "[发送] 信令地址: " << signalingUrl << " 会话: " << sessionId << "\n";
     Configuration config;
     if (stunServer)
         config.iceServers.emplace_back(*stunServer);
