@@ -146,11 +146,19 @@ int main(int argc, char *argv[]) {
         while (true) {
             try {
                 auto offer = signaling.fetchOffer(sessionId);
-                if (offer) {
-                    pc.setRemoteDescription(Description(*offer));
-                    pc.setLocalDescription(Description::Type::Answer);
-                    return;
+                if (!offer) {
+                    continue;
                 }
+
+                Description description(*offer);
+                if (description.type() != Description::Type::Offer) {
+                    std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")\n";
+                    continue;
+                }
+
+                pc.setRemoteDescription(description);
+                pc.setLocalDescription(Description::Type::Answer);
+                return;
             } catch (const std::exception &e) {
                 std::cerr << "获取 Offer 失败: " << e.what() << "\n";
             }
