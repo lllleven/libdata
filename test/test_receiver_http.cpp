@@ -53,6 +53,9 @@ int main(int argc, char *argv[]) {
 
     const std::string signalingUrl = argv[1];
     const std::string sessionId = argv[2];
+    const std::string runId =
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const std::string runPrefix = "[run-" + runId + "] ";
     uint64_t expectedMb = 0;
 
     try {
@@ -66,7 +69,7 @@ int main(int argc, char *argv[]) {
     const std::optional<std::string> stunServer = (argc >= 5 ? std::optional<std::string>(argv[4]) : std::nullopt);
     const uint64_t totalBytes = expectedMb * 1024ull * 1024ull;
 
-    std::cout << "[接收] 信令地址: " << signalingUrl << " 会话: " << sessionId
+    std::cout << runPrefix << "[接收] 信令地址: " << signalingUrl << " 会话: " << sessionId
               << " 目标: " << expectedMb << "MB" << std::endl;
     Configuration config;
     if (stunServer)

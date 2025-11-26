@@ -54,6 +54,9 @@ int main(int argc, char *argv[]) {
 
     const std::string signalingUrl = argv[1];
     const std::string sessionId = argv[2];
+    const std::string runId =
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const std::string runPrefix = "[run-" + runId + "] ";
     uint64_t fileMb = 0;
     uint64_t chunkSize = 0;
 
@@ -74,8 +77,8 @@ int main(int argc, char *argv[]) {
     const std::optional<std::string> stunServer = (argc >= 6 ? std::optional<std::string>(argv[5]) : std::nullopt);
     const uint64_t totalBytes = fileMb * 1024ull * 1024ull;
 
-    std::cout << "[发送] 信令地址: " << signalingUrl << " 会话: " << sessionId << " 文件: " << fileMb
-              << "MB chunk: " << chunkSize << std::endl;
+    std::cout << runPrefix << "[发送] 信令地址: " << signalingUrl << " 会话: " << sessionId
+              << " 文件: " << fileMb << "MB chunk: " << chunkSize << std::endl;
     Configuration config;
     if (stunServer)
         config.iceServers.emplace_back(*stunServer);
