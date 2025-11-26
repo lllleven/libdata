@@ -344,15 +344,12 @@ void runReceiver(const string& serverUrl, const string& sessionId,
 
     // 接收数据通道
     shared_ptr<DataChannel> dc;
-    atomic<bool> stopLogger(false);
-    queue<size_t> pendingChunks;
-    mutex queueMutex;
-    condition_variable queueCv;
     atomic<size_t> lastLoggedBytes(0);
-    thread loggerThread;
+    steady_clock::time_point lastLogTime = steady_clock::now();
+    double lastProgressPercent = -1.0;
 
     pc.onDataChannel([&dc, &receivedBytes, &receivedChunks, &transferStartTime, expectedBytes,
-                     &pendingChunks, &queueMutex, &queueCv, &stopLogger, &loggerThread, &lastLoggedBytes](shared_ptr<DataChannel> incoming) {
+                     &lastLoggedBytes, &lastLogTime, &lastProgressPercent](shared_ptr<DataChannel> incoming) {
         dc = incoming;
         cout << "[DataChannel] 接收到数据通道: \"" << dc->label() << "\"" << endl;
 
@@ -361,51 +358,33 @@ void runReceiver(const string& serverUrl, const string& sessionId,
             cout << "[DataChannel] 已打开，开始接收文件..." << endl;
         });
 
-        loggerThread = thread([&]() {
-            double lastProgressPercent = -1.0;
-            while (!stopLogger.load()) {
-                unique_lock lk(queueMutex);
-                if (pendingChunks.empty()) {
-                    queueCv.wait_for(lk, 1s);
-                }
-                while (!pendingChunks.empty()) {
-                    receivedBytes += pendingChunks.front();
-                    pendingChunks.pop();
-                }
-                lk.unlock();
-
-                double progress = (receivedBytes.load() * 100.0) / expectedBytes;
-                if (progress - lastProgressPercent >= 0.1) {
-                    lastProgressPercent = progress;
-                    cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress 
-                         << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
-                         << (expectedBytes / 1024 / 1024) << " MB)" << endl;
-                }
-
-                auto logged = lastLoggedBytes.load();
-                auto current = receivedBytes.load();
-                if (current - logged >= 256 * 1024) {
-                    cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB" << endl;
-                    lastLoggedBytes = current;
-                }
-            }
-        });
-
-        dc->onMessage([&pendingChunks, &queueMutex, &queueCv](variant<binary, string> message) {
+        dc->onMessage([&receivedBytes, &receivedChunks, expectedBytes, &lastLoggedBytes, &lastLogTime, &lastProgressPercent](variant<binary, string> message) {
             if (holds_alternative<binary>(message)) {
                 const auto &bin = get<binary>(message);
-                {
-                    lock_guard lk(queueMutex);
-                    pendingChunks.push(bin.size());
+                receivedBytes += bin.size();
+                receivedChunks++;
+                auto now = steady_clock::now();
+                if (duration_cast<seconds>(now - lastLogTime) >= 1s) {
+                    lastLogTime = now;
+                    double progress = (receivedBytes.load() * 100.0) / expectedBytes;
+                    if (progress - lastProgressPercent >= 0.1) {
+                        lastProgressPercent = progress;
+                        cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress 
+                             << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
+                             << (expectedBytes / 1024 / 1024) << " MB)" << endl;
+                    }
+                    auto logged = lastLoggedBytes.load();
+                    auto current = receivedBytes.load();
+                    if (current - logged >= 256 * 1024) {
+                        cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB" << endl;
+                        lastLoggedBytes = current;
+                    }
                 }
-                queueCv.notify_one();
             }
         });
 
-        dc->onClosed([&stopLogger, &queueCv]() {
-            stopLogger.store(true);
-            queueCv.notify_all();
-            cout << "[" << currentTimestamp() << "] [DataChannel] 已关闭" << endl; 
+        dc->onClosed([]() {
+            cout << "[" << currentTimestamp() << "] [DataChannel] 已关闭" << endl;
         });
     });
 
