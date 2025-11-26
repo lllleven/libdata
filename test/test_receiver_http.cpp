@@ -84,9 +84,12 @@ int main(int argc, char *argv[]) {
     std::thread candidateThread;
     std::unordered_set<std::string> seenCandidates;
 
+    std::atomic<bool> offerHandled{false};
     candidateThread = std::thread([&] {
         std::cout << "[接收] 候选线程启动" << std::endl;
         while (running.load()) {
+            if (offerHandled.load())
+                break;
             try {
                 size_t added = 0;
                 for (const auto &entry : signaling.fetchSenderCandidates(sessionId)) {
@@ -178,8 +181,10 @@ int main(int argc, char *argv[]) {
 
                 const auto offerSdp = static_cast<std::string>(description);
                 std::cout << "[接收] 设置远端描述 (Offer):\n" << offerSdp << std::endl;
+                std::cout << "[接收] 设置远端描述 (Offer):" << std::endl;
                 pc.setRemoteDescription(description);
                 pc.setLocalDescription(Description::Type::Answer);
+                offerHandled.store(true);
                 signaling.clearSession(sessionId);
                 return;
             } catch (const std::exception &e) {

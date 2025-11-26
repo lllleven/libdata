@@ -97,9 +97,12 @@ int main(int argc, char *argv[]) {
     if (totalBytes == 0)
         sendFinished.store(true);
 
+    std::atomic<bool> offerHandled{false};
     candidateThread = std::thread([&] {
         std::cout << "[发送] 候选线程启动" << std::endl;
         while (running.load()) {
+            if (offerHandled.load())
+                break;
             try {
                 if (!pc.remoteDescription()) {
                     std::this_thread::sleep_for(250ms);
@@ -184,7 +187,7 @@ int main(int argc, char *argv[]) {
                     sendChunk();
                     if (sentBytes.load() >= totalBytes)
                         break;
-                    if (channel->closed())
+                    if (!channel->isOpen())
                         break;
                 }
                 std::this_thread::sleep_for(50ms);
