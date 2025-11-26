@@ -28,7 +28,6 @@
 #include <map>
 #include <curl/curl.h>
 #include <cctype>
-#include <cctype>
 
 using namespace rtc;
 using namespace std;
@@ -776,8 +775,8 @@ int main(int argc, char **argv) {
     string serverUrl = "http://localhost:9227";
     string sessionId = "test_session_1";
     size_t fileSizeMB = 500;  // 默认500MB
-    size_t chunkSize = 65535;  // 默认65535字节
-    size_t bufferThreshold = chunkSize;
+    size_t chunkSize = 65536;  // 默认64KB
+    size_t bufferThreshold = 10 * 1024 * 1024;  // 默认10MB
     string stunServer;
 
     if (argc > 1) {
@@ -795,26 +794,12 @@ int main(int argc, char **argv) {
     }
     if (argc > 4) {
         chunkSize = atoi(argv[4]);
-        if (chunkSize <= 0) {
-            cerr << "错误: 消息块大小必须大于0字节" << endl;
-            return -1;
-        }
     }
     if (argc > 5) {
-        string arg5 = argv[5];
-        bool isNumber = !arg5.empty() && (arg5[0] == '+' || arg5[0] == '-' || isdigit(arg5[0]));
-        if (isNumber) {
-            bufferThreshold = atoi(arg5.c_str());
-            if (bufferThreshold <= 0) {
-                cerr << "错误: buffer 阈值必须大于0字节" << endl;
-                return -1;
-            }
-            if (argc > 6) {
-                stunServer = argv[6];
-            }
-        } else {
-            stunServer = arg5;
-        }
+        bufferThreshold = atoi(argv[5]);
+    }
+    if (argc > 6) {
+        stunServer = argv[6];
     }
 
     // 初始化CURL
