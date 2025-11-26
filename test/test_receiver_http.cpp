@@ -13,6 +13,9 @@
 #include <thread>
 #include <unordered_set>
 
+using std::shared_ptr;
+using std::weak_ptr;
+
 using namespace std::chrono_literals;
 using namespace rtc;
 

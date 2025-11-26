@@ -14,6 +14,9 @@
 #include <thread>
 #include <unordered_set>
 
+using std::shared_ptr;
+using std::weak_ptr;
+
 template <class T>
 constexpr weak_ptr<T> make_weak_ptr(shared_ptr<T> ptr) {
     return ptr;
