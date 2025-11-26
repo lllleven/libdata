@@ -509,7 +509,7 @@ void runSender(const string& serverUrl, const string& sessionId,
         try {
             size_t currentSent = 0;
             while (dc->isOpen() && currentSent < totalBytes) {
-                if (dc->bufferedAmount() == 0) {
+                if (dc->bufferedAmount() < chunkSize) {
                     size_t remaining = totalBytes - currentSent;
                     size_t toSend = min(remaining, chunkSize);
                     
@@ -537,7 +537,7 @@ void runSender(const string& serverUrl, const string& sessionId,
                     static auto lastBufferLog = steady_clock::now();
                     auto now = steady_clock::now();
                     if (duration_cast<seconds>(now - lastBufferLog) >= 1s) {
-                        cout << "[发送] 等待缓冲清空, bufferedAmount=" << dc->bufferedAmount() << endl;
+                        cout << "[发送] 缓冲量过大, bufferedAmount=" << dc->bufferedAmount() << endl;
                         lastBufferLog = now;
                     }
                     this_thread::sleep_for(1ms);
@@ -558,7 +558,7 @@ void runSender(const string& serverUrl, const string& sessionId,
 
         try {
             size_t currentSent = sentBytes.load();
-            while (dc->isOpen() && currentSent < totalBytes && dc->bufferedAmount() == 0) {
+            while (dc->isOpen() && currentSent < totalBytes && dc->bufferedAmount() < chunkSize) {
                 size_t remaining = totalBytes - currentSent;
                 size_t toSend = min(remaining, chunkSize);
                 
