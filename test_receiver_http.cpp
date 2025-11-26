@@ -28,8 +28,6 @@
 #include <map>
 #include <curl/curl.h>
 #include <ctime>
-#include <plog/Log.h>
-#include <plog/Appenders/ColorConsoleAppender.h>
 
 using namespace rtc;
 using namespace std;
@@ -348,12 +346,10 @@ void runReceiver(const string& serverUrl, const string& sessionId,
     pc.onDataChannel([&dc, &receivedBytes, &receivedChunks, &transferStartTime, expectedBytes](shared_ptr<DataChannel> incoming) {
         dc = incoming;
         cout << "[DataChannel] 接收到数据通道: \"" << dc->label() << "\"" << endl;
-        PLOGI << "DataChannel received: " << dc->label();
 
         dc->onOpen([&transferStartTime]() {
             transferStartTime = steady_clock::now();
             cout << "[DataChannel] 已打开，开始接收文件..." << endl;
-            PLOGI << "DataChannel open, ready to receive";
         });
 
         atomic<size_t> lastLoggedBytes(0);
@@ -369,15 +365,12 @@ void runReceiver(const string& serverUrl, const string& sessionId,
                     cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress 
                          << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
                          << (expectedBytes / 1024 / 1024) << " MB)" << endl;
-                    PLOGI << "Progress " << fixed << setprecision(1) << progress
-                          << "% (" << (receivedBytes.load() / 1024 / 1024) << "MB)";
                 }
                 auto logged = lastLoggedBytes.load();
                 auto current = receivedBytes.load();
                 if (current - logged >= 256 * 1024) {
                     cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB, chunk 大小 " 
                          << bin.size() << " 字节" << endl;
-                    PLOGI << "Received " << (current / 1024.0 / 1024.0) << " MB total, chunk " << bin.size() << " bytes";
                     lastLoggedBytes = current;
                 }
             }

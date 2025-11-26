@@ -28,10 +28,7 @@
 #include <map>
 #include <curl/curl.h>
 #include <cctype>
-#include <plog/Log.h>
-#include <plog/Init.h>
-#include <plog/Appenders/ColorConsoleAppender.h>
-#include <plog/Formatters/TxtFormatter.h>
+#include <ctime>
 
 using namespace rtc;
 using namespace std;
@@ -41,6 +38,23 @@ using chrono::duration_cast;
 using chrono::milliseconds;
 using chrono::steady_clock;
 using chrono::seconds;
+using chrono::system_clock;
+
+string currentTimestamp() {
+    auto now = system_clock::now();
+    auto tt = system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
+    char buf[16];
+    if (std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm)) {
+        return string(buf);
+    }
+    return {};
+}
 
 template <class T> weak_ptr<T> make_weak_ptr(shared_ptr<T> ptr) { return ptr; }
 
@@ -449,7 +463,7 @@ void runSender(const string& serverUrl, const string& sessionId,
         cout << "STUN服务器: " << stunServer << endl;
     }
     cout << "========================================" << endl;
-    PLOGI << "Sender initialized: session=" << sessionId << ", chunkSize=" << chunkSize << ", bufferThreshold=" << bufferThreshold;
+    cout << "[" << currentTimestamp() << "] [Sender] Initialized: session=" << sessionId << ", chunkSize=" << chunkSize << ", bufferThreshold=" << bufferThreshold << endl;
 
     rtc::InitLogger(LogLevel::Warning);
     rtc::Preload();
@@ -523,13 +537,13 @@ void runSender(const string& serverUrl, const string& sessionId,
                     if (toSend == chunkSize) {
                         dc->send(chunkData);
                         cout << "[发送] 已推进 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
-                        PLOGD << "Sent chunk " << toSend << " bytes, buffered=" << dc->bufferedAmount();
+                        cout << "[" << currentTimestamp() << "] [发送] 已推进 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                     } else {
                         // 发送最后一个不完整的块
                         binary lastChunk(chunkData.begin(), chunkData.begin() + toSend);
                         dc->send(lastChunk);
                         cout << "[发送] 已发送最后一块 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
-                        PLOGD << "Sent last chunk " << toSend << " bytes, buffered=" << dc->bufferedAmount();
+                        cout << "[" << currentTimestamp() << "] [发送] 已发送最后一块 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                     }
                     
                     currentSent += toSend;
@@ -541,14 +555,14 @@ void runSender(const string& serverUrl, const string& sessionId,
                         double progress = (sentBytes.load() * 100.0) / totalBytes;
                         cout << "[进度] " << fixed << setprecision(1) << progress 
                              << "% (" << (sentBytes.load() / 1024 / 1024) << " MB)" << endl;
-                        PLOGI << "Progress " << fixed << setprecision(1) << progress << "% (" << (sentBytes.load() / 1024 / 1024) << " MB)";
+                        cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress << "% (" << (sentBytes.load() / 1024 / 1024) << " MB)" << endl;
                     }
                 } else {
                     static auto lastBufferLog = steady_clock::now();
                     auto now = steady_clock::now();
                     if (duration_cast<seconds>(now - lastBufferLog) >= 1s) {
                         cout << "[发送] 缓冲量过大, bufferedAmount=" << dc->bufferedAmount() << endl;
-                        PLOGW << "Buffer overshoot: " << dc->bufferedAmount();
+                        cout << "[" << currentTimestamp() << "] [缓冲] 过大, bufferedAmount=" << dc->bufferedAmount() << endl;
                         lastBufferLog = now;
                     }
                     this_thread::sleep_for(1ms);
@@ -575,11 +589,11 @@ void runSender(const string& serverUrl, const string& sessionId,
                 
                 if (toSend == chunkSize) {
                     dc->send(chunkData);
-                    PLOGD << "Buffered low send chunk " << toSend << " bytes, buffered=" << dc->bufferedAmount();
+                    cout << "[" << currentTimestamp() << "] [发送] 缓冲恢复，继续发 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                 } else {
                     binary lastChunk(chunkData.begin(), chunkData.begin() + toSend);
                     dc->send(lastChunk);
-                    PLOGD << "Buffered low send last chunk " << toSend << " bytes, buffered=" << dc->bufferedAmount();
+                    cout << "[" << currentTimestamp() << "] [发送] 缓冲恢复，发送最后块 " << toSend << " 字节, buffered=" << dc->bufferedAmount() << endl;
                 }
                 
                 currentSent += toSend;
@@ -789,9 +803,6 @@ int main(int argc, char **argv) {
     size_t chunkSize = 65536;  // 默认64KB
     size_t bufferThreshold = 10 * 1024 * 1024;  // 默认10MB
     string stunServer;
-
-    static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::debug, &consoleAppender);
 
     if (argc > 1) {
         serverUrl = argv[1];
