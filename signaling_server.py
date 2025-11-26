@@ -19,6 +19,11 @@ import time
 from collections import defaultdict
 from urllib.parse import unquote
 
+
+def log_request():
+    args = {k: request.args.get(k) for k in request.args}
+    print(f"[请求日志] {request.method} {request.path} args={args}")
+
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
 
@@ -49,105 +54,69 @@ def health():
     """健康检查"""
     return jsonify({'status': 'ok'})
 
-@app.route('/session/<session_id>/offer', methods=['GET', 'POST'])
-def set_offer(session_id):
-    """发送端设置Offer（支持GET和POST）"""
-    sdp = None
-    if request.method == 'GET':
-        sdp = request.args.get('sdp')
-        if sdp:
-            sdp = unquote(sdp)
-    else:
-        data = request.json
-        if data and 'sdp' in data:
-            sdp = data['sdp']
-    
-    if not sdp:
-        return jsonify({'error': 'Missing sdp field'}), 400
-    
-    with locks[session_id]:
-        signaling_data[session_id]['offer'] = sdp
-        signaling_data[session_id]['sender_candidates'] = []
-        signaling_data[session_id]['receiver_candidates'] = []
-    
-    print(f"[信令] Session {session_id}: Offer已设置")
-    return jsonify({'status': 'ok'})
-
 @app.route('/session/<session_id>/offer', methods=['GET'])
-def get_offer(session_id):
-    """接收端获取Offer"""
+def offer_handler(session_id):
+    """发送端/接收端通过GET设置或获取Offer"""
+    log_request()
+    sdp = request.args.get('sdp')
+    if sdp:
+        sdp = unquote(sdp)
+        with locks[session_id]:
+            signaling_data[session_id]['offer'] = sdp
+            signaling_data[session_id]['sender_candidates'] = []
+            signaling_data[session_id]['receiver_candidates'] = []
+
+        print(f"[信令] Session {session_id}: Offer已设置")
+        return jsonify({'status': 'ok'})
+
     with locks[session_id]:
         offer = signaling_data[session_id]['offer']
-    
+
     if offer is None:
         return jsonify({'error': 'Offer not found'}), 404
-    
+
     print(f"[信令] Session {session_id}: Offer已获取")
     return jsonify({'sdp': offer})
 
-@app.route('/session/<session_id>/answer', methods=['GET', 'POST'])
-def set_answer(session_id):
-    """接收端设置Answer（支持GET和POST）"""
-    sdp = None
-    if request.method == 'GET':
-        sdp = request.args.get('sdp')
-        if sdp:
-            sdp = unquote(sdp)
-    else:
-        data = request.json
-        if data and 'sdp' in data:
-            sdp = data['sdp']
-    
-    if not sdp:
-        return jsonify({'error': 'Missing sdp field'}), 400
-    
-    with locks[session_id]:
-        signaling_data[session_id]['answer'] = sdp
-    
-    print(f"[信令] Session {session_id}: Answer已设置")
-    return jsonify({'status': 'ok'})
-
 @app.route('/session/<session_id>/answer', methods=['GET'])
-def get_answer(session_id):
-    """发送端获取Answer"""
+def answer_handler(session_id):
+    """接收端/发送端通过GET设置或获取Answer"""
+    log_request()
+    sdp = request.args.get('sdp')
+    if sdp:
+        sdp = unquote(sdp)
+        with locks[session_id]:
+            signaling_data[session_id]['answer'] = sdp
+        print(f"[信令] Session {session_id}: Answer已设置")
+        return jsonify({'status': 'ok'})
+
     with locks[session_id]:
         answer = signaling_data[session_id]['answer']
-    
+
     if answer is None:
         return jsonify({'error': 'Answer not found'}), 404
-    
+
     print(f"[信令] Session {session_id}: Answer已获取")
     return jsonify({'sdp': answer})
 
-@app.route('/session/<session_id>/candidate/sender', methods=['GET', 'POST'])
-def add_sender_candidate(session_id):
-    """发送端添加候选者（支持GET和POST）"""
-    candidate = None
-    mid = None
-    
-    if request.method == 'GET':
-        candidate = request.args.get('candidate')
-        mid = request.args.get('mid')
-        if candidate:
-            candidate = unquote(candidate)
-        if mid:
-            mid = unquote(mid)
-    else:
-        data = request.json
-        if data:
-            candidate = data.get('candidate')
-            mid = data.get('mid')
-    
-    if not candidate or not mid:
-        return jsonify({'error': 'Missing candidate or mid field'}), 400
-    
+@app.route('/session/<session_id>/candidate/sender', methods=['GET'])
+def candidate_sender_handler(session_id):
+    """发送端添加候选者或接收端获取候选者"""
+    log_request()
+    candidate = request.args.get('candidate')
+    mid = request.args.get('mid')
+    if candidate and mid:
+        candidate = unquote(candidate)
+        mid = unquote(mid)
+        with locks[session_id]:
+            signaling_data[session_id]['sender_candidates'].append({
+                'candidate': candidate,
+                'mid': mid
+            })
+        return jsonify({'status': 'ok'})
     with locks[session_id]:
-        signaling_data[session_id]['sender_candidates'].append({
-            'candidate': candidate,
-            'mid': mid
-        })
-    
-    return jsonify({'status': 'ok'})
+        candidates = signaling_data[session_id]['sender_candidates'].copy()
+    return jsonify({'candidates': candidates})
 
 @app.route('/session/<session_id>/candidate/sender', methods=['GET'])
 def get_sender_candidates(session_id):
@@ -157,35 +126,24 @@ def get_sender_candidates(session_id):
     
     return jsonify({'candidates': candidates})
 
-@app.route('/session/<session_id>/candidate/receiver', methods=['GET', 'POST'])
-def add_receiver_candidate(session_id):
-    """接收端添加候选者（支持GET和POST）"""
-    candidate = None
-    mid = None
-    
-    if request.method == 'GET':
-        candidate = request.args.get('candidate')
-        mid = request.args.get('mid')
-        if candidate:
-            candidate = unquote(candidate)
-        if mid:
-            mid = unquote(mid)
-    else:
-        data = request.json
-        if data:
-            candidate = data.get('candidate')
-            mid = data.get('mid')
-    
-    if not candidate or not mid:
-        return jsonify({'error': 'Missing candidate or mid field'}), 400
-    
+@app.route('/session/<session_id>/candidate/receiver', methods=['GET'])
+def candidate_receiver_handler(session_id):
+    """接收端添加候选者或发送端获取候选者"""
+    log_request()
+    candidate = request.args.get('candidate')
+    mid = request.args.get('mid')
+    if candidate and mid:
+        candidate = unquote(candidate)
+        mid = unquote(mid)
+        with locks[session_id]:
+            signaling_data[session_id]['receiver_candidates'].append({
+                'candidate': candidate,
+                'mid': mid
+            })
+        return jsonify({'status': 'ok'})
     with locks[session_id]:
-        signaling_data[session_id]['receiver_candidates'].append({
-            'candidate': candidate,
-            'mid': mid
-        })
-    
-    return jsonify({'status': 'ok'})
+        candidates = signaling_data[session_id]['receiver_candidates'].copy()
+    return jsonify({'candidates': candidates})
 
 @app.route('/session/<session_id>/candidate/receiver', methods=['GET'])
 def get_receiver_candidates(session_id):
