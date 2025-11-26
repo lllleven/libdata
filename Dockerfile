@@ -46,17 +46,20 @@ RUN cmake -B build \
     && cd build && make -j$(nproc)
 
 # 编译测试程序
-RUN g++ -std=c++17 test_sender_http.cpp -o test_sender_http \
-    -Ideps/plog/include \
+RUN g++ -std=c++17 test/test_sender_http.cpp -o test_sender_http \
     -I./include \
+    -I./test \
+    -Ideps/json/single_include \
     -L./build \
     -Wl,-rpath,/usr/local/lib \
     -ldatachannel \
     -pthread \
     -lssl -lcrypto \
     -lcurl \
-    && g++ -std=c++17 test_receiver_http.cpp -o test_receiver_http \
+    && g++ -std=c++17 test/test_receiver_http.cpp -o test_receiver_http \
     -I./include \
+    -I./test \
+    -Ideps/json/single_include \
     -L./build \
     -Wl,-rpath,/usr/local/lib \
     -ldatachannel \
@@ -90,6 +93,7 @@ WORKDIR /app
 COPY --from=builder /app/signaling_server.py /app/
 COPY --from=builder /app/test_sender_http /app/
 COPY --from=builder /app/test_receiver_http /app/
+COPY --from=builder /app/start_test.sh /app/
 
 # 复制库文件
 COPY --from=builder /app/build/libdatachannel.so* /usr/local/lib/
@@ -99,7 +103,10 @@ RUN ldconfig
 
 # 设置可执行权限
 RUN chmod +x /app/signaling_server.py /app/test_sender_http /app/test_receiver_http
+RUN chmod +x /app/start_test.sh
 
+# 默认入口由 start_test.sh 管理，可通过命令行参数或环境变量控制
+ENTRYPOINT ["/app/start_test.sh"]
 # 不设置默认启动命令，由用户在启动容器时决定
 # 使用示例：
 # docker run <image> python3 /app/signaling_server.py
