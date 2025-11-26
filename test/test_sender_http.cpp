@@ -179,6 +179,8 @@ int main(int argc, char *argv[]) {
     });
 
     auto waitForAnswer = [&]() {
+        auto lastLog = std::chrono::steady_clock::now();
+        std::cout << "[发送] 等待 Answer...\n";
         while (true) {
             try {
                 auto answer = signaling.fetchAnswer(sessionId);
@@ -190,6 +192,11 @@ int main(int argc, char *argv[]) {
                 std::cerr << "获取 Answer 失败: " << e.what() << "\n";
             }
             std::this_thread::sleep_for(200ms);
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastLog).count() >= 5) {
+                std::cout << "[发送] 仍在等待 Answer...\n";
+                lastLog = now;
+            }
         }
     };
 

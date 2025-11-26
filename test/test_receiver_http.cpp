@@ -140,6 +140,8 @@ int main(int argc, char *argv[]) {
     });
 
     auto waitForOffer = [&]() {
+        auto lastLog = std::chrono::steady_clock::now();
+        std::cout << "[接收] 等待 Offer...\n";
         while (true) {
             try {
                 auto offer = signaling.fetchOffer(sessionId);
@@ -152,6 +154,11 @@ int main(int argc, char *argv[]) {
                 std::cerr << "获取 Offer 失败: " << e.what() << "\n";
             }
             std::this_thread::sleep_for(200ms);
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastLog).count() >= 5) {
+                std::cout << "[接收] 仍在等待 Offer...\n";
+                lastLog = now;
+            }
         }
     };
 
