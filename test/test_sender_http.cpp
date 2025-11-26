@@ -152,43 +152,58 @@ int main(int argc, char *argv[]) {
 
     auto dataChannel = pc.createDataChannel("http-benchmark");
 
-    dataChannel->onOpen([&, dataChannelWeak = make_weak_ptr(dataChannel)]() {
+    auto sendChunk = [&, dataChannelWeak = make_weak_ptr(dataChannel)]() {
         if (auto channel = dataChannelWeak.lock()) {
-            std::cout << "[发送] 数据通道已打开，准备推送消息\n";
-            senderThread = std::thread([&, channel]() {
-                auto sendStart = std::chrono::steady_clock::now();
-                while (sentBytes.load() < totalBytes && channel->isOpen()) {
-                    if (channel->bufferedAmount() >= chunkSize) {
-                        std::this_thread::sleep_for(2ms);
-                        continue;
-                    }
+            while (sentBytes.load() < totalBytes && channel->isOpen() &&
+                   channel->bufferedAmount() < chunkSize) {
+                const uint64_t remaining = totalBytes - sentBytes.load();
+                const size_t sendSize = static_cast<size_t>(std::min<uint64_t>(chunkSize, remaining));
+                if (sendSize == 0)
+                    break;
 
-                    const uint64_t remaining = totalBytes - sentBytes.load();
-                    const size_t sendSize = static_cast<size_t>(std::min<uint64_t>(chunkSize, remaining));
-                    if (sendSize == 0)
-                        break;
+                binary message(sendSize);
+                std::fill(message.begin(), message.end(), byte(0xAB));
 
-                    binary message(sendSize);
-                    std::fill(message.begin(), message.end(), byte(0xAB));
-
-                    try {
-                        channel->send(message);
-                        sentBytes += sendSize;
-                    } catch (const std::exception &e) {
-                        std::cerr << "数据发送失败: " << e.what() << "\n";
-                        break;
-                    }
+                try {
+                    channel->send(message);
+                    sentBytes += sendSize;
+                } catch (const std::exception &e) {
+                    std::cerr << "数据发送失败: " << e.what() << "\n";
+                    break;
                 }
-                sendFinished.store(true);
-                auto sendEnd = std::chrono::steady_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart);
-                if (duration.count() > 0) {
-                    double mb = bytesToMb(sentBytes.load());
-                    double mbps = (mb * 8.0) / (duration.count() / 1000.0);
-                    std::cout << "[发送] 完成 " << mb << " MB, 平均速率 "
-                              << std::fixed << std::setprecision(2) << mbps << " Mbit/s\n";
+            }
+        }
+    };
+
+    dataChannel->onOpen([&, dataChannelWeak = make_weak_ptr(dataChannel)]() {
+        std::cout << "[发送] 数据通道已打开，准备推送消息\n";
+        auto sendStart = std::chrono::steady_clock::now();
+        senderThread = std::thread([&, dataChannelWeak]() {
+            while (!sendFinished.load()) {
+                if (auto channel = dataChannelWeak.lock()) {
+                    sendChunk();
+                    if (sentBytes.load() >= totalBytes)
+                        break;
+                    if (channel->closed())
+                        break;
                 }
-            });
+                std::this_thread::sleep_for(50ms);
+            }
+            auto sendEnd = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart);
+            if (duration.count() > 0) {
+                double mb = bytesToMb(sentBytes.load());
+                double mbps = (mb * 8.0) / (duration.count() / 1000.0);
+                std::cout << "[发送] 完成 " << mb << " MB, 平均速率 "
+                          << std::fixed << std::setprecision(2) << mbps << " Mbit/s\n";
+            }
+            sendFinished.store(true);
+        });
+    });
+
+    dataChannel->onBufferedAmountLow([&, dataChannelWeak = make_weak_ptr(dataChannel)]() {
+        if (auto channel = dataChannelWeak.lock()) {
+            sendChunk();
         }
     });
 
