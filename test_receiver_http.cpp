@@ -26,6 +26,7 @@
 #include <sstream>
 #include <set>
 #include <map>
+#include <queue>
 #include <curl/curl.h>
 #include <ctime>
 
@@ -343,7 +344,15 @@ void runReceiver(const string& serverUrl, const string& sessionId,
 
     // 接收数据通道
     shared_ptr<DataChannel> dc;
-    pc.onDataChannel([&dc, &receivedBytes, &receivedChunks, &transferStartTime, expectedBytes](shared_ptr<DataChannel> incoming) {
+    atomic<bool> stopLogger(false);
+    queue<size_t> pendingChunks;
+    mutex queueMutex;
+    condition_variable queueCv;
+    atomic<size_t> lastLoggedBytes(0);
+    thread loggerThread;
+
+    pc.onDataChannel([&dc, &receivedBytes, &receivedChunks, &transferStartTime, expectedBytes,
+                     &pendingChunks, &queueMutex, &queueCv, &stopLogger, &loggerThread, &lastLoggedBytes](shared_ptr<DataChannel> incoming) {
         dc = incoming;
         cout << "[DataChannel] 接收到数据通道: \"" << dc->label() << "\"" << endl;
 
@@ -352,32 +361,51 @@ void runReceiver(const string& serverUrl, const string& sessionId,
             cout << "[DataChannel] 已打开，开始接收文件..." << endl;
         });
 
-        atomic<size_t> lastLoggedBytes(0);
-        dc->onMessage([&receivedBytes, &receivedChunks, expectedBytes, &lastLoggedBytes](variant<binary, string> message) {
-            if (holds_alternative<binary>(message)) {
-                const auto &bin = get<binary>(message);
-                receivedBytes += bin.size();
-                receivedChunks++;
-                
-                // 每接收10MB显示一次进度
-                if (receivedBytes.load() % (10 * 1024 * 1024) < bin.size()) {
-                    double progress = (receivedBytes.load() * 100.0) / expectedBytes;
+        loggerThread = thread([&]() {
+            double lastProgressPercent = -1.0;
+            while (!stopLogger.load()) {
+                unique_lock lk(queueMutex);
+                if (pendingChunks.empty()) {
+                    queueCv.wait_for(lk, 1s);
+                }
+                while (!pendingChunks.empty()) {
+                    receivedBytes += pendingChunks.front();
+                    pendingChunks.pop();
+                }
+                lk.unlock();
+
+                double progress = (receivedBytes.load() * 100.0) / expectedBytes;
+                if (progress - lastProgressPercent >= 0.1) {
+                    lastProgressPercent = progress;
                     cout << "[" << currentTimestamp() << "] [进度] " << fixed << setprecision(1) << progress 
                          << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
                          << (expectedBytes / 1024 / 1024) << " MB)" << endl;
                 }
+
                 auto logged = lastLoggedBytes.load();
                 auto current = receivedBytes.load();
                 if (current - logged >= 256 * 1024) {
-                    cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB, chunk 大小 " 
-                         << bin.size() << " 字节" << endl;
+                    cout << "[" << currentTimestamp() << "] [接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB" << endl;
                     lastLoggedBytes = current;
                 }
             }
         });
 
-        dc->onClosed([]() { 
-            cout << "[DataChannel] 已关闭" << endl; 
+        dc->onMessage([&pendingChunks, &queueMutex, &queueCv](variant<binary, string> message) {
+            if (holds_alternative<binary>(message)) {
+                const auto &bin = get<binary>(message);
+                {
+                    lock_guard lk(queueMutex);
+                    pendingChunks.push(bin.size());
+                }
+                queueCv.notify_one();
+            }
+        });
+
+        dc->onClosed([&stopLogger, &queueCv]() {
+            stopLogger.store(true);
+            queueCv.notify_all();
+            cout << "[" << currentTimestamp() << "] [DataChannel] 已关闭" << endl; 
         });
     });
 
@@ -554,6 +582,11 @@ void runReceiver(const string& serverUrl, const string& sessionId,
 
     cout << "========================================" << endl;
 
+    stopLogger.store(true);
+    queueCv.notify_all();
+    if (loggerThread.joinable()) {
+        loggerThread.join();
+    }
     rtc::Cleanup();
 }
 
