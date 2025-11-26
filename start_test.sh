@@ -42,6 +42,8 @@ case "$MODE" in
         FILE_SIZE_MB=${FILE_SIZE_MB:-500}
         CHUNK_SIZE=${CHUNK_SIZE:-65535}
 
+        echo "[启动] 发送端 -> $SIGNALING_URL 会话 $SESSION_ID 文件 ${FILE_SIZE_MB}MB chunk $CHUNK_SIZE"
+
         CMD=(/app/test_sender_http "$SIGNALING_URL" "$SESSION_ID" "$FILE_SIZE_MB" "$CHUNK_SIZE")
         if [ -n "${STUN_SERVER:-}" ]; then
             CMD+=("$STUN_SERVER")
@@ -56,6 +58,8 @@ case "$MODE" in
         SIGNALING_URL=${SIGNALING_SERVER_URL:-http://127.0.0.1:9227}
         SESSION_ID=${SESSION_ID:-test_session_1}
         EXPECTED_MB=${EXPECTED_FILE_MB:-500}
+
+        echo "[启动] 接收端 -> $SIGNALING_URL 会话 $SESSION_ID 预计 ${EXPECTED_MB}MB"
 
         CMD=(/app/test_receiver_http "$SIGNALING_URL" "$SESSION_ID" "$EXPECTED_MB")
         if [ -n "${STUN_SERVER:-}" ]; then
