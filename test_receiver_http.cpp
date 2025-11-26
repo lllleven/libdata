@@ -334,7 +334,8 @@ void runReceiver(const string& serverUrl, const string& sessionId,
             cout << "[DataChannel] 已打开，开始接收文件..." << endl;
         });
 
-        dc->onMessage([&receivedBytes, &receivedChunks, expectedBytes](variant<binary, string> message) {
+        atomic<size_t> lastLoggedBytes(0);
+        dc->onMessage([&receivedBytes, &receivedChunks, expectedBytes, &lastLoggedBytes](variant<binary, string> message) {
             if (holds_alternative<binary>(message)) {
                 const auto &bin = get<binary>(message);
                 receivedBytes += bin.size();
@@ -346,6 +347,13 @@ void runReceiver(const string& serverUrl, const string& sessionId,
                     cout << "[进度] " << fixed << setprecision(1) << progress 
                          << "% (" << (receivedBytes.load() / 1024 / 1024) << " MB / " 
                          << (expectedBytes / 1024 / 1024) << " MB)" << endl;
+                }
+                auto logged = lastLoggedBytes.load();
+                auto current = receivedBytes.load();
+                if (current - logged >= 256 * 1024) {
+                    cout << "[接收] 共接收 " << (current / 1024.0 / 1024.0) << " MB, chunk 大小 " 
+                         << bin.size() << " 字节" << endl;
+                    lastLoggedBytes = current;
                 }
             }
         });
