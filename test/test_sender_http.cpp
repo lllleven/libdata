@@ -100,6 +100,11 @@ int main(int argc, char *argv[]) {
     candidateThread = std::thread([&] {
         while (running.load()) {
             try {
+                if (!pc.remoteDescription()) {
+                    std::this_thread::sleep_for(250ms);
+                    continue;
+                }
+
                 for (const auto &entry : signaling.fetchReceiverCandidates(sessionId)) {
                     const std::string key = entry.candidate + "|" + entry.mid;
                     if (seenCandidates.insert(key).second) {
@@ -182,8 +187,10 @@ int main(int argc, char *argv[]) {
 
     auto waitForAnswer = [&]() {
         constexpr auto pollInterval = 1s;
+        const auto intervalMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(pollInterval).count();
         auto lastLog = std::chrono::steady_clock::now();
-        std::cout << "[发送] 等待 Answer... (每 " << pollInterval.count() << " 毫秒请求一次)" << std::endl;
+        std::cout << "[发送] 等待 Answer... (每 " << intervalMs << " 毫秒请求一次)" << std::endl;
         while (true) {
             try {
                 auto answer = signaling.fetchAnswer(sessionId);

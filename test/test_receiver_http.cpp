@@ -143,9 +143,11 @@ int main(int argc, char *argv[]) {
 
     auto waitForOffer = [&]() {
         constexpr auto pollInterval = 1s;
+        const auto intervalMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(pollInterval).count();
         auto lastLog = std::chrono::steady_clock::now();
         auto lastSkipLog = std::chrono::steady_clock::now();
-        std::cout << "[接收] 等待 Offer... (每 " << pollInterval.count() << " 毫秒请求一次)" << std::endl;
+        std::cout << "[接收] 等待 Offer... (每 " << intervalMs << " 毫秒请求一次)" << std::endl;
         while (true) {
             try {
                 auto offer = signaling.fetchOffer(sessionId);
@@ -157,7 +159,7 @@ int main(int argc, char *argv[]) {
                 if (description.type() != Description::Type::Offer) {
                     auto now = std::chrono::steady_clock::now();
                     if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSkipLog).count() >= 10) {
-                        std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")" << std::endl;
+            std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")" << std::endl;
                         lastSkipLog = now;
                     }
                     continue;
