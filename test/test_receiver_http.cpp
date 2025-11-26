@@ -152,7 +152,7 @@ int main(int argc, char *argv[]) {
     });
 
     auto waitForOffer = [&]() {
-        constexpr auto pollInterval = 1s;
+        constexpr auto pollInterval = 5s;
         const auto intervalMs =
             std::chrono::duration_cast<std::chrono::milliseconds>(pollInterval).count();
         auto lastLog = std::chrono::steady_clock::now();
