@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
     const uint64_t totalBytes = fileMb * 1024ull * 1024ull;
 
     std::cout << "[发送] 信令地址: " << signalingUrl << " 会话: " << sessionId << " 文件: " << fileMb
-              << "MB chunk: " << chunkSize << "\n";
+              << "MB chunk: " << chunkSize << std::endl;
     Configuration config;
     if (stunServer)
         config.iceServers.emplace_back(*stunServer);
@@ -181,8 +181,9 @@ int main(int argc, char *argv[]) {
     });
 
     auto waitForAnswer = [&]() {
+        constexpr auto pollInterval = 1s;
         auto lastLog = std::chrono::steady_clock::now();
-        std::cout << "[发送] 等待 Answer...\n";
+        std::cout << "[发送] 等待 Answer... (每 " << pollInterval.count() << " 毫秒请求一次)" << std::endl;
         while (true) {
             try {
                 auto answer = signaling.fetchAnswer(sessionId);
@@ -193,10 +194,10 @@ int main(int argc, char *argv[]) {
             } catch (const std::exception &e) {
                 std::cerr << "获取 Answer 失败: " << e.what() << "\n";
             }
-            std::this_thread::sleep_for(200ms);
+            std::this_thread::sleep_for(pollInterval);
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::seconds>(now - lastLog).count() >= 5) {
-                std::cout << "[发送] 仍在等待 Answer...\n";
+                std::cout << "[发送] 仍在等待 Answer..." << std::endl;
                 lastLog = now;
             }
         }

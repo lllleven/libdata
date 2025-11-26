@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
     const uint64_t totalBytes = expectedMb * 1024ull * 1024ull;
 
     std::cout << "[接收] 信令地址: " << signalingUrl << " 会话: " << sessionId
-              << " 目标: " << expectedMb << "MB\n";
+              << " 目标: " << expectedMb << "MB" << std::endl;
     Configuration config;
     if (stunServer)
         config.iceServers.emplace_back(*stunServer);
@@ -142,9 +142,10 @@ int main(int argc, char *argv[]) {
     });
 
     auto waitForOffer = [&]() {
+        constexpr auto pollInterval = 1s;
         auto lastLog = std::chrono::steady_clock::now();
-        std::cout << "[接收] 等待 Offer...\n";
         auto lastSkipLog = std::chrono::steady_clock::now();
+        std::cout << "[接收] 等待 Offer... (每 " << pollInterval.count() << " 毫秒请求一次)" << std::endl;
         while (true) {
             try {
                 auto offer = signaling.fetchOffer(sessionId);
@@ -156,7 +157,7 @@ int main(int argc, char *argv[]) {
                 if (description.type() != Description::Type::Offer) {
                     auto now = std::chrono::steady_clock::now();
                     if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSkipLog).count() >= 10) {
-                        std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")\n";
+                        std::cout << "[接收] 跳过非 Offer 描述 (" << description.typeString() << ")" << std::endl;
                         lastSkipLog = now;
                     }
                     continue;
@@ -168,10 +169,10 @@ int main(int argc, char *argv[]) {
             } catch (const std::exception &e) {
                 std::cerr << "获取 Offer 失败: " << e.what() << "\n";
             }
-            std::this_thread::sleep_for(200ms);
+            std::this_thread::sleep_for(pollInterval);
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::seconds>(now - lastLog).count() >= 5) {
-                std::cout << "[接收] 仍在等待 Offer...\n";
+                std::cout << "[接收] 仍在等待 Offer..." << std::endl;
                 lastLog = now;
             }
         }
